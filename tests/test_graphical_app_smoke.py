@@ -18,8 +18,10 @@ def test_simulation_and_hardware_modes():
     c.set_mode("simulation")
     c.devices.connect()
     p = c.generate_pattern("single-gaussian", {"kx": 0.01, "ky": 0.02})
-    outputs = c.simulate_before_apply(p)
-    assert "simulated_phase" in outputs
+    assert p.success and p.payload is not None
+    outputs = c.simulate_before_apply(p.payload)
+    assert outputs.success
+    assert "simulated_phase" in outputs.payload
     c.set_mode("hardware")
     c.devices.connect()
     assert c.state.mode == Mode.HARDWARE

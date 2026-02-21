@@ -147,7 +147,12 @@ class AppController:
         return self._run("configure_camera", lambda: self.devices.camera.configure(settings), "Camera configured")
 
     def camera_telemetry(self) -> OperationResult:
-        return self._run("camera_telemetry", self.devices.camera.telemetry, "Camera telemetry refreshed")
+        def _impl() -> Dict[str, Any]:
+            telemetry = self.devices.camera.telemetry()
+            self.state.update_camera_telemetry(telemetry)
+            return self.state.camera_telemetry
+
+        return self._run("camera_telemetry", _impl, "Camera telemetry refreshed")
 
     def run_optimization(self, config: Mapping[str, Any]) -> OperationResult:
         def _impl() -> None:

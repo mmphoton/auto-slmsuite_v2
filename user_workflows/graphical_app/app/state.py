@@ -106,6 +106,13 @@ class AppState:
     notifications: List[str] = field(default_factory=list)
     logs: List[LogEntry] = field(default_factory=list)
     progress: ProgressState = field(default_factory=ProgressState)
+    camera_telemetry: Dict[str, Any] = field(default_factory=dict)
+    camera_temperature_thresholds: Dict[str, float] = field(
+        default_factory=lambda: {
+            "warning_c": -55.0,
+            "critical_c": -45.0,
+        }
+    )
 
     @property
     def mode(self) -> Mode:
@@ -156,3 +163,16 @@ class AppState:
                 source=source,
             )
         )
+
+    def update_camera_telemetry(self, telemetry: Optional[Dict[str, Any]]) -> None:
+        payload = dict(telemetry or {})
+        if "temperature_c" in payload and payload["temperature_c"] is not None:
+            temperature = float(payload["temperature_c"])
+            payload["temperature_status"] = "ok"
+            if temperature >= self.camera_temperature_thresholds["critical_c"]:
+                payload["temperature_status"] = "critical"
+            elif temperature >= self.camera_temperature_thresholds["warning_c"]:
+                payload["temperature_status"] = "warning"
+        elif "temperature_status" not in payload:
+            payload["temperature_status"] = "unknown"
+        self.camera_telemetry = payload
