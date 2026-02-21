@@ -65,6 +65,58 @@ class AppController:
         except Exception as exc:  # central exception hook for backend errors
             return self._handle_exception(action, exc)
 
+
+    def _compose_pattern_with_blaze(self, base_pattern: np.ndarray) -> np.ndarray:
+        composed = np.asarray(base_pattern, dtype=float)
+        if not self.state.blaze.enabled:
+            return np.mod(composed, 2 * np.pi)
+
+        ny, nx = composed.shape
+        y, x = np.indices((ny, nx))
+        xx = (x - nx / 2) / nx
+        yy = (y - ny / 2) / ny
+        blaze_phase = 2 * np.pi * (self.state.blaze.kx * xx + self.state.blaze.ky * yy)
+        composed = composed + blaze_phase
+
+        if self.state.blaze.offset is not None:
+            composed = composed + float(self.state.blaze.offset)
+        if self.state.blaze.scale is not None:
+            composed = composed * float(self.state.blaze.scale)
+
+        return np.mod(composed, 2 * np.pi)
+
+    def configure_blaze(self, settings: Mapping[str, Any]) -> OperationResult:
+        def _impl() -> dict[str, Any]:
+            enabled = bool(settings.get("enabled", False))
+            kx = float(settings.get("kx", 0.0))
+            ky = float(settings.get("ky", 0.0))
+            if not -1.0 <= kx <= 1.0:
+                raise ValueError("blaze kx must be within [-1.0, 1.0]")
+            if not -1.0 <= ky <= 1.0:
+                raise ValueError("blaze ky must be within [-1.0, 1.0]")
+
+            offset_raw = settings.get("offset")
+            scale_raw = settings.get("scale")
+            offset = None if offset_raw in (None, "") else float(offset_raw)
+            scale = None if scale_raw in (None, "") else float(scale_raw)
+            if scale is not None and scale <= 0:
+                raise ValueError("blaze scale must be > 0 when provided")
+
+            self.state.blaze.enabled = enabled
+            self.state.blaze.kx = kx
+            self.state.blaze.ky = ky
+            self.state.blaze.offset = offset
+            self.state.blaze.scale = scale
+            return {
+                "enabled": enabled,
+                "kx": kx,
+                "ky": ky,
+                "offset": offset,
+                "scale": scale,
+            }
+
+        return self._run("configure_blaze", _impl, "Blaze settings updated")
+
     def start_run(self, run_id: str, params: Mapping[str, Any]) -> OperationResult:
         def _impl() -> None:
             self.state.active_run = RunMetadata(
@@ -74,6 +126,13 @@ class AppController:
                 parameters=dict(params),
                 calibration_profile=self.state.settings_snapshots.calibration.get("profile_name"),
                 optimizer=dict(self.state.settings_snapshots.optimizer),
+                blaze={
+                    "enabled": self.state.blaze.enabled,
+                    "kx": self.state.blaze.kx,
+                    "ky": self.state.blaze.ky,
+                    "offset": self.state.blaze.offset,
+                    "scale": self.state.blaze.scale,
+                },
             )
             self.state.workflow.active_workflow = "run_active"
 
@@ -119,10 +178,11 @@ class AppController:
 
     def simulate_before_apply(self, pattern: np.ndarray) -> OperationResult:
         def _impl() -> Dict[str, np.ndarray]:
-            self.devices.slm.apply_pattern(pattern)
+            composed_pattern = self._compose_pattern_with_blaze(pattern)
+            self.devices.slm.apply_pattern(composed_pattern)
             experimental = self.devices.camera.acquire_frame()
-            simulated_phase = pattern
-            simulated_intensity = np.abs(np.fft.fftshift(np.fft.fft2(np.exp(1j * pattern))))
+            simulated_phase = composed_pattern
+            simulated_intensity = np.abs(np.fft.fftshift(np.fft.fft2(np.exp(1j * composed_pattern))))
             simulated_intensity /= max(float(simulated_intensity.max()), 1e-9)
             payload = {
                 "simulated_phase": simulated_phase,
@@ -136,10 +196,18 @@ class AppController:
         return self._run("simulate_before_apply", _impl, "Simulation complete")
 
     def apply_pattern(self, pattern: np.ndarray) -> OperationResult:
-        return self._run("apply_pattern", lambda: self.devices.slm.apply_pattern(pattern), "Pattern applied to SLM")
+        return self._run(
+            "apply_pattern",
+            lambda: self.devices.slm.apply_pattern(self._compose_pattern_with_blaze(pattern)),
+            "Pattern applied to SLM",
+        )
 
     def queue_pattern(self, pattern: np.ndarray) -> OperationResult:
-        return self._run("queue_pattern", lambda: self.devices.slm.queue_pattern(pattern), "Pattern queued")
+        return self._run(
+            "queue_pattern",
+            lambda: self.devices.slm.queue_pattern(self._compose_pattern_with_blaze(pattern)),
+            "Pattern queued",
+        )
 
     def clear_pattern_queue(self) -> OperationResult:
         return self._run("clear_pattern_queue", self.devices.slm.clear_queue, "SLM queue cleared")

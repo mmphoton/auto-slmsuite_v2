@@ -114,6 +114,27 @@ class MainWindow(tk.Tk):
         ttk.Button(frm, text="Load Pattern Preset", command=self._bind_safe("load_pattern_preset", self._load_pattern_preset)).pack(fill=tk.X)
         ttk.Button(frm, text="Reset Parameters", command=self._bind_safe("reset_pattern_params", self._reset_pattern_params)).pack(fill=tk.X)
 
+        ttk.Separator(frm, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=4)
+        ttk.Label(frm, text="Blaze composition").pack(anchor="w")
+        self.blaze_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frm, text="Enable blaze", variable=self.blaze_enabled).pack(anchor="w")
+
+        self.blaze_kx = tk.StringVar(value="0.0")
+        ttk.Label(frm, text="blaze kx [-1,1]:").pack(anchor="w")
+        ttk.Entry(frm, textvariable=self.blaze_kx).pack(fill=tk.X)
+
+        self.blaze_ky = tk.StringVar(value="0.0")
+        ttk.Label(frm, text="blaze ky [-1,1]:").pack(anchor="w")
+        ttk.Entry(frm, textvariable=self.blaze_ky).pack(fill=tk.X)
+
+        self.blaze_offset = tk.StringVar(value="")
+        ttk.Label(frm, text="offset (optional rad):").pack(anchor="w")
+        ttk.Entry(frm, textvariable=self.blaze_offset).pack(fill=tk.X)
+
+        self.blaze_scale = tk.StringVar(value="")
+        ttk.Label(frm, text="scale (optional > 0):").pack(anchor="w")
+        ttk.Entry(frm, textvariable=self.blaze_scale).pack(fill=tk.X)
+
         ttk.Button(frm, text="Simulate Before Apply", command=self._bind_safe("simulate", self._simulate)).pack(fill=tk.X)
         ttk.Button(frm, text="Apply", command=self._bind_safe("apply", self._apply)).pack(fill=tk.X)
         ttk.Button(frm, text="Queue", command=self._bind_safe("queue", self._queue)).pack(fill=tk.X)
@@ -233,9 +254,54 @@ class MainWindow(tk.Tk):
             return None
         return params
 
+    def _collect_blaze_settings(self) -> dict[str, object] | None:
+        def _optional_float(raw: str, field_name: str) -> float | None:
+            value = raw.strip()
+            if not value:
+                return None
+            try:
+                return float(value)
+            except ValueError:
+                raise ValueError(f"{field_name} must be a float")
+
+        try:
+            kx = float(self.blaze_kx.get().strip() or "0.0")
+            ky = float(self.blaze_ky.get().strip() or "0.0")
+            offset = _optional_float(self.blaze_offset.get(), "offset")
+            scale = _optional_float(self.blaze_scale.get(), "scale")
+        except ValueError as exc:
+            self.status_var.set(f"Blaze validation error: {exc}")
+            return None
+
+        if not -1.0 <= kx <= 1.0:
+            self.status_var.set("Blaze validation error: kx must be within [-1.0, 1.0]")
+            return None
+        if not -1.0 <= ky <= 1.0:
+            self.status_var.set("Blaze validation error: ky must be within [-1.0, 1.0]")
+            return None
+        if scale is not None and scale <= 0:
+            self.status_var.set("Blaze validation error: scale must be > 0")
+            return None
+
+        return {
+            "enabled": self.blaze_enabled.get(),
+            "kx": kx,
+            "ky": ky,
+            "offset": offset,
+            "scale": scale,
+        }
+
+    def _apply_blaze_settings(self) -> bool:
+        settings = self._collect_blaze_settings()
+        if settings is None:
+            return False
+        result = self.controller.configure_blaze(settings)
+        self._handle_result(result)
+        return result.success
+
     def _simulate(self) -> None:
         params = self._collect_pattern_params()
-        if params is None:
+        if params is None or not self._apply_blaze_settings():
             return
         pattern_result = self.controller.generate_pattern(self.pattern_name.get(), params)
         self._handle_result(pattern_result)
@@ -244,7 +310,7 @@ class MainWindow(tk.Tk):
 
     def _apply(self) -> None:
         params = self._collect_pattern_params()
-        if params is None:
+        if params is None or not self._apply_blaze_settings():
             return
         pattern_result = self.controller.generate_pattern(self.pattern_name.get(), params)
         self._handle_result(pattern_result)
@@ -253,7 +319,7 @@ class MainWindow(tk.Tk):
 
     def _queue(self) -> None:
         params = self._collect_pattern_params()
-        if params is None:
+        if params is None or not self._apply_blaze_settings():
             return
         pattern_result = self.controller.generate_pattern(self.pattern_name.get(), params)
         self._handle_result(pattern_result)
