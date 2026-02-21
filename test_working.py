@@ -1,3 +1,4 @@
+from pathlib import Path
 import numpy as np
 import scipy.io
 from slmsuite.hardware.slms.holoeye import Holoeye
@@ -12,9 +13,17 @@ from slmsuite.holography.algorithms import SpotHologram
 import time
 
 from user_workflows.calibration_io import assert_required_calibration_files
+from user_workflows.io.output_manager import OutputManager
+from user_workflows.io.run_naming import RunNamingConfig
 
 CALIBRATION_ROOT = "user_workflows/calibrations"
 calibration_paths = assert_required_calibration_files(CALIBRATION_ROOT)
+output = OutputManager(
+    RunNamingConfig(run_name="test_working", output_root=Path("user_workflows/output")),
+    pattern="diagnostic",
+    camera="none",
+    metadata={"workflow": "test_working"},
+)
 FOURIER_CALIBRATION_FILE = calibration_paths["fourier"]
 WAVEFRONT_CALIBRATION_FILE = calibration_paths["wavefront_superpixel"]
 SOURCE_AMPLITUDE_CORRECTED = np.load(calibration_paths["source_amplitude"])
@@ -78,6 +87,7 @@ corrected = (phi_wrapped - np.pi) * F + np.pi
 corrected_phase = np.mod(corrected, 2*np.pi)
 
 hologram = corrected_phase
+output.save_phase(hologram)
 # hologram.optimize('WGS-Kim',feedback='computational_spot',stat_groups=['computational_spot'], maxiter=30)
 
 
@@ -93,3 +103,6 @@ time.sleep(5)
 slm.set_phase(None, settle=True)
 slm.close()
 print("SLM cleared")
+output.save_metrics({"status": "completed"})
+output.save_manifest()
+print(f"Diagnostic outputs: {output.run_dir.resolve()}")
