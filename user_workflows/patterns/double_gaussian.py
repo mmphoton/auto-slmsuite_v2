@@ -1,0 +1,43 @@
+"""Two Gaussian-like spots pattern."""
+
+from __future__ import annotations
+
+import numpy as np
+
+from slmsuite.holography.algorithms import SpotHologram
+
+from user_workflows.patterns.base import BasePattern, PatternResult, register_pattern
+
+
+@register_pattern
+class DoubleGaussianPattern(BasePattern):
+    name = "double-gaussian"
+
+    def build(self, args, slm) -> PatternResult:
+        shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+        dx = float(args.double_sep_kxy) / 2.0
+        spot_kxy = np.array(
+            [
+                [args.double_center_kx - dx, args.double_center_kx + dx],
+                [args.double_center_ky, args.double_center_ky],
+            ]
+        )
+        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
+        hologram.optimize(
+            method=args.holo_method,
+            maxiter=args.holo_maxiter,
+            feedback="computational",
+            stat_groups=["computational"],
+        )
+        phase = np.mod(hologram.get_phase(), 2 * np.pi)
+        return PatternResult(
+            phase=phase,
+            metadata={
+                "pattern": self.name,
+                "spot_kxy": spot_kxy.tolist(),
+                "separation_kxy": args.double_sep_kxy,
+                "padded_shape": shape,
+                "holo_method": args.holo_method,
+                "holo_maxiter": args.holo_maxiter,
+            },
+        )
