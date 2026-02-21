@@ -12,11 +12,10 @@ import scipy.io
 from slmsuite.hardware.cameras.andor_idus import AndorIDus
 from slmsuite.hardware.cameraslms import FourierSLM
 from slmsuite.hardware.slms.holoeye import Holoeye
-from slmsuite.holography.algorithms import FeedbackHologram, SpotHologram
-from slmsuite.holography.toolbox.phase import blaze
-from slmsuite.holography.toolbox import phase
+from slmsuite.holography.algorithms import FeedbackHologram
 
 from user_workflows.calibration_io import assert_required_calibration_files
+from user_workflows.patterns import get_pattern, list_patterns
 
 
 def load_phase_lut(path: Path, key: str = "deep") -> np.ndarray:
@@ -36,50 +35,10 @@ def _depth_correct(phi, deep):
     return np.mod(corrected, 2 * np.pi)
 
 
-def build_pattern(args, slm, deep):
-    """Build one of several user-selectable analytical pattern families."""
-    ny, nx = slm.shape
-
-    if args.pattern == "laguerre-gaussian":
-        lg_phase = phase.laguerre_gaussian(slm, l=args.lg_l, p=args.lg_p)
-        phi = np.mod(lg_phase + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
-        return _depth_correct(phi, deep)
-
-    # Spot-based patterns use hologram optimization so users get Gaussian-like focused spots.
-    shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
-
-    if args.pattern == "single-gaussian":
-        spot_kxy = np.array([[args.single_kx], [args.single_ky]])
-        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
-    elif args.pattern == "double-gaussian":
-        dx = float(args.double_sep_kxy) / 2.0
-        spot_kxy = np.array(
-            [
-                [args.double_center_kx - dx, args.double_center_kx + dx],
-                [args.double_center_ky, args.double_center_ky],
-            ]
-        )
-        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
-    elif args.pattern == "gaussian-lattice":
-        hologram = SpotHologram.make_rectangular_array(
-            shape,
-            array_shape=(args.lattice_nx, args.lattice_ny),
-            array_pitch=(args.lattice_pitch_x, args.lattice_pitch_y),
-            array_center=(args.lattice_center_kx, args.lattice_center_ky),
-            basis="kxy",
-            cameraslm=slm,
-        )
-    else:
-        raise ValueError(f"Unknown pattern '{args.pattern}'")
-
-    hologram.optimize(
-        method=args.holo_method,
-        maxiter=args.holo_maxiter,
-        feedback="computational",
-        stat_groups=["computational"],
-    )
-    phi = np.mod(hologram.get_phase(), 2 * np.pi)
-    return _depth_correct(phi, deep)
+def build_pattern(config, slm, deep):
+    """Build a registered user-selectable analytical pattern."""
+    pattern_factory = get_pattern(config.pattern.name)
+    return pattern_factory(config, slm, deep, _depth_correct)
 
 
 def hold_until_interrupt(slm, cam=None):
@@ -119,7 +78,7 @@ def main():
     parser.add_argument(
         "--pattern",
         default="laguerre-gaussian",
-        choices=["single-gaussian", "double-gaussian", "gaussian-lattice", "laguerre-gaussian"],
+        choices=list_patterns(),
         help="Pattern family to generate on SLM",
     )
 
@@ -167,7 +126,8 @@ def main():
 
     slm = Holoeye(preselect="index:0")
     deep = load_phase_lut(Path(args.lut_file), args.lut_key)
-    pattern = build_pattern(args, slm, deep)
+    config = argparse.Namespace(pattern=argparse.Namespace(name=args.pattern), args=args)
+    pattern = build_pattern(config, slm, deep)
     slm.set_phase(pattern, settle=True)
     print(f"Pattern '{args.pattern}' displayed on SLM")
 
