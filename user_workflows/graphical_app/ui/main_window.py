@@ -2,15 +2,117 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, ttk
 
+import numpy as np
+
 from user_workflows.graphical_app.app.controller import AppController
 from user_workflows.graphical_app.app.interfaces import OperationResult
 from user_workflows.graphical_app.app.state import LogLevel
 from user_workflows.graphical_app.ui.pattern_form import PatternFormRenderer, parity_check_for_schema
+
+
+
+class PlotWidget(ttk.Frame):
+    def __init__(self, parent: tk.Misc, controller: AppController, plot_name: str, on_status) -> None:
+        super().__init__(parent)
+        self.controller = controller
+        self.plot_name = plot_name
+        self.on_status = on_status
+        self._img: tk.PhotoImage | None = None
+
+        self.canvas = tk.Canvas(self, width=300, height=240, background="#101010", highlightthickness=1)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+
+        controls = ttk.Frame(self)
+        controls.pack(fill=tk.X, pady=2)
+        for label, command in (("Zoom +", lambda: self._zoom(0.7)), ("Zoom -", lambda: self._zoom(1.3)), ("←", lambda: self._pan(-0.15, 0.0)), ("→", lambda: self._pan(0.15, 0.0)), ("↑", lambda: self._pan(0.0, -0.15)), ("↓", lambda: self._pan(0.0, 0.15)), ("Reset", self._reset)):
+            ttk.Button(controls, text=label, command=command).pack(side=tk.LEFT, padx=1)
+
+        settings = ttk.Frame(self)
+        settings.pack(fill=tk.X)
+        self.autoscale_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(settings, text="Autoscale", variable=self.autoscale_var, command=self._apply_settings).grid(row=0, column=0, sticky="w")
+
+        ttk.Label(settings, text="Scale").grid(row=0, column=1, sticky="e")
+        self.scale_var = tk.StringVar(value="linear")
+        ttk.Combobox(settings, textvariable=self.scale_var, values=["linear", "log"], width=8, state="readonly").grid(row=0, column=2, sticky="w")
+
+        ttk.Label(settings, text="Colormap").grid(row=0, column=3, sticky="e")
+        self.cmap_var = tk.StringVar(value="viridis")
+        ttk.Combobox(settings, textvariable=self.cmap_var, values=["viridis", "gray", "plasma", "magma"], width=10, state="readonly").grid(row=0, column=4, sticky="w")
+
+        ttk.Label(settings, text="xlim").grid(row=1, column=0, sticky="e")
+        self.xmin = tk.StringVar(value="")
+        self.xmax = tk.StringVar(value="")
+        ttk.Entry(settings, textvariable=self.xmin, width=8).grid(row=1, column=1, sticky="w")
+        ttk.Entry(settings, textvariable=self.xmax, width=8).grid(row=1, column=2, sticky="w")
+
+        ttk.Label(settings, text="ylim").grid(row=1, column=3, sticky="e")
+        self.ymin = tk.StringVar(value="")
+        self.ymax = tk.StringVar(value="")
+        ttk.Entry(settings, textvariable=self.ymin, width=8).grid(row=1, column=4, sticky="w")
+        ttk.Button(settings, text="Apply", command=self._apply_settings).grid(row=1, column=5, padx=2)
+
+    def _zoom(self, factor: float) -> None:
+        self.on_status(self.controller.zoom_plot(self.plot_name, factor))
+        self.refresh()
+
+    def _pan(self, dx: float, dy: float) -> None:
+        self.on_status(self.controller.pan_plot(self.plot_name, dx, dy))
+        self.refresh()
+
+    def _reset(self) -> None:
+        self.on_status(self.controller.reset_plot(self.plot_name))
+        self.refresh()
+
+    def _parse_pair(self, a: str, b: str) -> tuple[float, float] | None:
+        if not a.strip() or not b.strip():
+            return None
+        return (float(a), float(b))
+
+    def _apply_settings(self) -> None:
+        try:
+            payload = {
+                "autoscale": self.autoscale_var.get(),
+                "scale": self.scale_var.get(),
+                "colormap": self.cmap_var.get(),
+                "xlim": self._parse_pair(self.xmin.get(), self.xmax.get()),
+                "ylim": self._parse_pair(self.ymin.get(), self.ymax.get()),
+            }
+        except ValueError as exc:
+            self.on_status(f"Plot settings error ({self.plot_name}): {exc}")
+            return
+        self.on_status(self.controller.configure_plot(self.plot_name, payload))
+        self.refresh()
+
+    def _sync_from_backend(self) -> None:
+        model = self.controller.plots.get_plot_model(self.plot_name)
+        self.autoscale_var.set(bool(model.settings.autoscale))
+        self.scale_var.set(model.settings.scale)
+        self.cmap_var.set(model.settings.colormap)
+        xlim = model.settings.xlim
+        ylim = model.settings.ylim
+        self.xmin.set("" if xlim is None else f"{xlim[0]:.3f}")
+        self.xmax.set("" if xlim is None else f"{xlim[1]:.3f}")
+        self.ymin.set("" if ylim is None else f"{ylim[0]:.3f}")
+        self.ymax.set("" if ylim is None else f"{ylim[1]:.3f}")
+
+    def refresh(self) -> None:
+        self._sync_from_backend()
+        rgb = self.controller.plots.render_rgb(self.plot_name)
+        if rgb.ndim != 3:
+            rgb = np.stack([rgb, rgb, rgb], axis=-1)
+        h, w = rgb.shape[:2]
+        ppm = f"P6\n{w} {h}\n255\n".encode("ascii") + rgb.astype(np.uint8).tobytes()
+        self._img = tk.PhotoImage(data=base64.b64encode(ppm), format="PPM")
+        self.canvas.delete("all")
+        self.canvas.create_image(0, 0, anchor="nw", image=self._img)
+        self.canvas.configure(scrollregion=(0, 0, w, h))
 
 
 class MainWindow(tk.Tk):
@@ -28,6 +130,7 @@ class MainWindow(tk.Tk):
         self.panel_columns: dict[str, str] = {}
         self.visibility_vars = {name: tk.BooleanVar(value=True) for name in self.PANEL_NAMES}
         self.plot_popouts: dict[str, tk.Toplevel] = {}
+        self.plot_widgets: dict[str, PlotWidget] = {}
 
         self.main_pane = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
         self.main_pane.pack(fill=tk.BOTH, expand=True)
@@ -46,6 +149,7 @@ class MainWindow(tk.Tk):
         self.restore_layout()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(800, self._schedule_progress_refresh)
+        self.after(500, self._schedule_plot_refresh)
 
     def _safe_callback(self, callback_name: str, fn) -> None:
         try:
@@ -193,10 +297,20 @@ class MainWindow(tk.Tk):
 
     def _build_plot_panel(self) -> None:
         frm = self._create_panel("Plots", "center")
-        self.plot_select = tk.StringVar(value="simulated_phase")
-        ttk.Combobox(frm, textvariable=self.plot_select, values=["simulated_phase", "simulated_intensity", "experimental_intensity", "optimization_convergence"]).pack(fill=tk.X)
+        self.plot_names = ["simulated_phase", "simulated_intensity", "experimental_intensity", "optimization_convergence"]
+        self.plot_select = tk.StringVar(value=self.plot_names[0])
+        ttk.Combobox(frm, textvariable=self.plot_select, values=self.plot_names, state="readonly").pack(fill=tk.X)
         ttk.Button(frm, text="Pop-out Plot", command=self._bind_safe("pop_plot", self._pop_plot)).pack(fill=tk.X)
         ttk.Button(frm, text="Export Plot", command=self._bind_safe("export_plot", self._export_plot)).pack(fill=tk.X)
+
+        self.plot_notebook = ttk.Notebook(frm)
+        self.plot_notebook.pack(fill=tk.BOTH, expand=True, pady=4)
+        for plot_name in self.plot_names:
+            tab = ttk.Frame(self.plot_notebook)
+            self.plot_notebook.add(tab, text=plot_name.replace("_", " ").title())
+            widget = PlotWidget(tab, self.controller, plot_name, self._set_plot_status)
+            widget.pack(fill=tk.BOTH, expand=True)
+            self.plot_widgets[plot_name] = widget
 
     def _build_optimization_panel(self) -> None:
         frm = self._create_panel("Optimization", "left")
@@ -494,10 +608,24 @@ class MainWindow(tk.Tk):
         self._safe_callback("progress_refresh", self._refresh_progress_widgets)
         self.after(800, self._schedule_progress_refresh)
 
+    def _schedule_plot_refresh(self) -> None:
+        self._safe_callback("plot_refresh", self._refresh_plot_widgets)
+        self.after(500, self._schedule_plot_refresh)
+
+    def _refresh_plot_widgets(self) -> None:
+        for widget in self.plot_widgets.values():
+            widget.refresh()
+
+    def _set_plot_status(self, result: OperationResult | str) -> None:
+        if isinstance(result, OperationResult):
+            self._handle_result(result)
+        else:
+            self.status_var.set(result)
+
     def _pop_plot(self) -> None:
         self._open_plot_popout(self.plot_select.get())
 
-    def _open_plot_popout(self, plot_name: str, geometry: str = "500x400") -> None:
+    def _open_plot_popout(self, plot_name: str, geometry: str = "700x560") -> None:
         if plot_name in self.plot_popouts and self.plot_popouts[plot_name].winfo_exists():
             self.plot_popouts[plot_name].lift()
             return
@@ -505,7 +633,10 @@ class MainWindow(tk.Tk):
         popout = tk.Toplevel(self)
         popout.title(f"Plot: {plot_name}")
         popout.geometry(geometry)
-        ttk.Label(popout, text=f"{plot_name} (zoom/pan/reset via backend settings)").pack(fill=tk.BOTH, expand=True)
+        popout.minsize(420, 320)
+        widget = PlotWidget(popout, self.controller, plot_name, self._set_plot_status)
+        widget.pack(fill=tk.BOTH, expand=True)
+        widget.refresh()
 
         def _on_close() -> None:
             self.plot_popouts.pop(plot_name, None)
