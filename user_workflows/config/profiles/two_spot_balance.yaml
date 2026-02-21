@@ -1,0 +1,23 @@
+{
+  "hardware": {"use_camera": true, "frames": 3},
+  "pattern": {
+    "pattern_type": "double-gaussian",
+    "family_params": {
+      "double_center_kx": 0.0,
+      "double_center_ky": 0.0,
+      "double_sep_kxy": 0.03,
+      "holo_method": "WGS-Kim",
+      "holo_maxiter": 50
+    }
+  },
+  "feedback": {
+    "enabled": true,
+    "method": "WGS-Kim",
+    "maxiter": 20,
+    "balancing_target": 1.0
+  },
+  "output": {
+    "run_name": "two_spot_balance",
+    "save_options": {"save_frames": true, "frames_path": "frames.npy"}
+  }
+}

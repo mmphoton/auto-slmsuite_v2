@@ -1,0 +1,9 @@
+{
+  "hardware": {"use_camera": false},
+  "pattern": {
+    "pattern_type": "laguerre-gaussian",
+    "family_params": {"lg_l": 1, "lg_p": 0}
+  },
+  "feedback": {"enabled": false},
+  "output": {"run_name": "quick_test"}
+}
