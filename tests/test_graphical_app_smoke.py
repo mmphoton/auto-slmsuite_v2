@@ -184,3 +184,53 @@ def test_ratio_target_optimization_and_export(tmp_path):
     assert payload["ratio_mode"] == "simulation"
     assert payload["target_definition"]["beam_count"] == 3
     assert payload["objective_weights"]["ratio"] == 0.6
+
+
+def test_calibration_load_validate_apply_and_active_run_metadata(tmp_path):
+    c = AppController()
+    c.start_run("run-cal", {"purpose": "calibration"})
+
+    profile = {
+        "name": "sim-default",
+        "mode": "simulation",
+        "slm_model": "simulatedslm",
+        "camera_model": "simulatedcamera",
+        "matrix": [[1.0, 0.0], [0.0, 1.0]],
+    }
+    path = tmp_path / "profile.json"
+    c.persistence.save_json(path, profile)
+
+    loaded = c.load_calibration_profile(str(path))
+    assert loaded.success
+    validated = c.validate_calibration_profile(loaded.payload)
+    assert validated.success
+    assert validated.payload["compatibility"]["compatible"] is True
+
+    applied = c.apply_calibration_profile(str(path))
+    assert applied.success
+    assert applied.payload["metrics"]["before_rmse"] >= 0.0
+    assert c.state.settings_snapshots.calibration["profile_name"] == "sim-default"
+    assert c.state.active_run is not None
+    assert c.state.active_run.calibration_profile == "sim-default"
+    assert "calibration_metrics" in c.state.active_run.parameters
+
+
+def test_calibration_apply_blocked_on_incompatible_profile(tmp_path):
+    c = AppController()
+    incompatible = {
+        "name": "hw-profile",
+        "mode": "hardware",
+        "slm_model": "hardwareslm",
+        "camera_model": "hardwarecamera",
+        "matrix": [[1.0, 0.0], [0.0, 1.0]],
+    }
+    path = tmp_path / "bad_profile.json"
+    c.persistence.save_json(path, incompatible)
+
+    validated = c.validate_calibration_profile(incompatible)
+    assert validated.success
+    assert validated.payload["compatibility"]["compatible"] is False
+
+    applied = c.apply_calibration_profile(str(path))
+    assert applied.success is False
+    assert "compatibility failed" in applied.message.lower()
