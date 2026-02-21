@@ -13,10 +13,14 @@ from slmsuite.hardware.cameras.andor_idus import AndorIDus
 from slmsuite.hardware.cameraslms import FourierSLM
 from slmsuite.hardware.slms.holoeye import Holoeye
 from slmsuite.holography.algorithms import FeedbackHologram, SpotHologram
-from slmsuite.holography.toolbox.phase import blaze
 from slmsuite.holography.toolbox import phase
 
 from user_workflows.calibration_io import assert_required_calibration_files
+from user_workflows.patterns.utils import (
+    add_blaze_and_wrap,
+    apply_depth_correction,
+    build_spot_solve_settings,
+)
 
 
 def load_phase_lut(path: Path, key: str = "deep") -> np.ndarray:
@@ -29,21 +33,14 @@ def load_phase_lut(path: Path, key: str = "deep") -> np.ndarray:
     return deep
 
 
-def _depth_correct(phi, deep):
-    idx = np.clip(np.rint((phi / (2 * np.pi)) * (deep.size - 1)), 0, deep.size - 1).astype(int)
-    F = deep[idx]
-    corrected = (phi - np.pi) * F + np.pi
-    return np.mod(corrected, 2 * np.pi)
-
-
 def build_pattern(args, slm, deep):
     """Build one of several user-selectable analytical pattern families."""
     ny, nx = slm.shape
 
     if args.pattern == "laguerre-gaussian":
         lg_phase = phase.laguerre_gaussian(slm, l=args.lg_l, p=args.lg_p)
-        phi = np.mod(lg_phase + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
-        return _depth_correct(phi, deep)
+        phi = add_blaze_and_wrap(base_phase=lg_phase, grid=slm, blaze_vector=(args.blaze_kx, args.blaze_ky))
+        return apply_depth_correction(phi, deep)
 
     # Spot-based patterns use hologram optimization so users get Gaussian-like focused spots.
     shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
@@ -72,14 +69,10 @@ def build_pattern(args, slm, deep):
     else:
         raise ValueError(f"Unknown pattern '{args.pattern}'")
 
-    hologram.optimize(
-        method=args.holo_method,
-        maxiter=args.holo_maxiter,
-        feedback="computational",
-        stat_groups=["computational"],
-    )
+    solve_settings = build_spot_solve_settings(method=args.holo_method, maxiter=args.holo_maxiter)
+    hologram.optimize(**solve_settings)
     phi = np.mod(hologram.get_phase(), 2 * np.pi)
-    return _depth_correct(phi, deep)
+    return apply_depth_correction(phi, deep)
 
 
 def hold_until_interrupt(slm, cam=None):
