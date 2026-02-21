@@ -13,6 +13,7 @@ import numpy as np
 from user_workflows.graphical_app.app.controller import AppController
 from user_workflows.graphical_app.app.interfaces import OperationResult
 from user_workflows.graphical_app.app.state import LogLevel
+from user_workflows.graphical_app.ui.calibration_window import CalibrationWindow
 from user_workflows.graphical_app.ui.pattern_form import PatternFormRenderer, parity_check_for_schema
 
 
@@ -385,13 +386,9 @@ class MainWindow(tk.Tk):
 
     def _build_calibration_panel(self) -> None:
         frm = self._create_panel("Calibration", "right")
-        ttk.Label(frm, text="Calibration profile path:").pack(anchor="w")
-        self.calibration_profile = ttk.Entry(frm)
-        self.calibration_profile.insert(0, "user_workflows/output/calibration_profile.json")
-        self.calibration_profile.pack(fill=tk.X)
-        ttk.Button(frm, text="Run Calibration", command=self._bind_safe("run_calibration", self._run_calibration)).pack(fill=tk.X)
+        self.calibration_window = CalibrationWindow(frm, self.controller, self.status_var.set)
+        self.calibration_window.pack(fill=tk.X)
         ttk.Button(frm, text="Cancel Calibration", command=self._bind_safe("cancel_calibration", lambda: self._handle_result(self.controller.cancel_calibration()))).pack(fill=tk.X)
-        ttk.Button(frm, text="Save Placeholder Profile", command=self._bind_safe("save_profile", self._save_calibration_profile)).pack(fill=tk.X)
         self.calibration_progress = ttk.Progressbar(frm, orient=tk.HORIZONTAL, mode="determinate", maximum=100)
         self.calibration_progress.pack(fill=tk.X, pady=3)
 
@@ -659,24 +656,9 @@ class MainWindow(tk.Tk):
         out = filedialog.asksaveasfilename(defaultextension=".csv") or "user_workflows/output/optimization_history.csv"
         self._handle_result(self.controller.export_optimization_history(out))
 
-    def _run_calibration(self) -> None:
-        self._handle_result(self.controller.run_calibration(self.calibration_profile.get()))
-
     def _run_sequence(self) -> None:
         steps = json.loads(self.sequence_entry.get())
         self._handle_result(self.controller.run_sequence(steps))
-
-    def _save_calibration_profile(self) -> None:
-        path = Path(self.calibration_profile.get())
-        profile = {
-            "name": "default",
-            "mode": self.mode.get(),
-            "slm_model": "simulated_slm",
-            "camera_model": "simulated_camera",
-            "matrix": [[1.0, 0.0], [0.0, 1.0]],
-        }
-        self.store.save_json(path, profile)
-        self.status_var.set(f"Saved placeholder profile to {path}")
 
     def _refresh_logs(self) -> None:
         for item in self.log_tree.get_children():

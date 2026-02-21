@@ -46,6 +46,13 @@ class AppController:
         self.plugins = PluginRegistry()
         self.plugins.load_builtin_patterns()
 
+    def _calibration_identifiers(self) -> dict[str, str]:
+        return {
+            "mode": self.state.mode.value,
+            "slm_model": type(self.devices.slm).__name__.lower(),
+            "camera_model": type(self.devices.camera).__name__.lower(),
+        }
+
     def _handle_exception(self, action: str, exc: Exception) -> OperationResult:
         message = f"{action} failed: {exc}"
         self.state.notify(message)
@@ -414,12 +421,76 @@ class AppController:
             self.calibration.save_profile(profile, Path(profile_path))
             self.state.update_task("calibration", 2, "Loading calibration profile")
             loaded = self.calibration.load_profile(Path(profile_path))
-            self.state.settings_snapshots.calibration = dict(loaded)
+            applied = self._load_validate_apply_calibration(Path(profile_path), loaded=loaded)
             self.state.update_task("calibration", 3, "Calibration complete")
             self.state.complete_task("calibration", "Calibration complete")
-            return loaded
+            return applied
 
         return self._run("run_calibration", _impl, "Calibration complete")
+
+    def calibration_context(self) -> OperationResult:
+        return self._run("calibration_context", self._calibration_identifiers, "Calibration context fetched")
+
+    def load_calibration_profile(self, profile_path: str) -> OperationResult:
+        return self._run(
+            "load_calibration_profile",
+            lambda: self.calibration.load_profile(Path(profile_path)),
+            "Calibration profile loaded",
+        )
+
+    def validate_calibration_profile(self, profile: Mapping[str, Any]) -> OperationResult:
+        def _impl() -> Dict[str, Any]:
+            validation = self.calibration.validate_profile(dict(profile))
+            context = self._calibration_identifiers()
+            compatibility = self.calibration.compatibility_report(dict(profile), **context)
+            validation["compatibility"] = compatibility
+            return validation
+
+        return self._run("validate_calibration_profile", _impl, "Calibration profile validated")
+
+    def apply_calibration_profile(self, profile_path: str) -> OperationResult:
+        return self._run(
+            "apply_calibration_profile",
+            lambda: self._load_validate_apply_calibration(Path(profile_path)),
+            "Calibration profile applied",
+        )
+
+    def _load_validate_apply_calibration(self, profile_path: Path, loaded: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        profile = dict(loaded) if loaded is not None else self.calibration.load_profile(profile_path)
+        validation = self.calibration.validate_profile(profile)
+        if not validation["valid"]:
+            raise ValueError(f"Calibration profile is invalid: missing={validation['missing_fields']}")
+
+        context = self._calibration_identifiers()
+        compatibility = self.calibration.compatibility_report(profile, **context)
+        if not compatibility["compatible"]:
+            raise ValueError(
+                "Calibration profile compatibility failed for mode/device identifiers: "
+                f"expected={compatibility['expected']} actual={compatibility['actual']}"
+            )
+
+        before_frame = self.devices.camera.acquire_frame()
+        applied = self.calibration.apply_profile(profile, before_frame)
+        self.state.settings_snapshots.calibration = {
+            **profile,
+            "profile_name": profile.get("name") or profile_path.name,
+            "profile_path": str(profile_path),
+            "compatibility": compatibility,
+            "metrics": applied["metrics"],
+        }
+        if self.state.active_run is not None:
+            self.state.active_run.calibration_profile = self.state.settings_snapshots.calibration["profile_name"]
+            self.state.active_run.parameters["calibration_profile"] = self.state.settings_snapshots.calibration["profile_name"]
+            self.state.active_run.parameters["calibration_metrics"] = applied["metrics"]
+
+        return {
+            "profile": profile,
+            "validation": validation,
+            "compatibility": compatibility,
+            "metrics": applied["metrics"],
+            "session_calibration_profile": self.state.settings_snapshots.calibration["profile_name"],
+            "profile_path": str(profile_path),
+        }
 
     def cancel_calibration(self) -> OperationResult:
         def _impl() -> None:
