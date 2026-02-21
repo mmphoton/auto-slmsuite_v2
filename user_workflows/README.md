@@ -1,4 +1,4 @@
-# User workflow files and calibration persistence
+# User workflow CLI and calibration persistence
 
 ## Centralized run naming/output API
 All workflow scripts now accept shared output naming controls:
