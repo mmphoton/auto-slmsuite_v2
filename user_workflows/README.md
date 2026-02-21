@@ -186,31 +186,33 @@ Use `run_slm_andor.py` to:
 - acquire full camera images of displayed SLM patterns,
 - optionally run camera-driven experimental feedback optimization.
 
-Example (camera + feedback + custom naming):
+## Pattern examples (4 built-in patterns + composite mode)
 
+### 1) Single Gaussian-like spot
 ```bash
 python user_workflows/run_slm_andor.py \
-  --use-camera \
-  --feedback \
-  --feedback-iters 15 \
-  --run-name lg_feedback \
-  --output-root user_workflows/output \
-  --name-template "{date}_{run_name}_{pattern}_{camera}_{iter}"
+  --pattern single-gaussian \
+  --single-kx 0.00 \
+  --single-ky 0.01
 ```
 
-Resulting run tree (example):
+### 2) Double Gaussian-like spots
+```bash
+python user_workflows/run_slm_andor.py \
+  --pattern double-gaussian \
+  --double-center-kx 0.00 \
+  --double-center-ky 0.00 \
+  --double-sep-kxy 0.03
+```
 
-```text
-user_workflows/output/
-└── 20260221_lg_feedback_laguerre-gaussian_andor_000/
-    ├── manifest.json
-    ├── metrics.json
-    ├── phase.npy
-    ├── frames/
-    │   ├── frame_000.npy
-    │   └── frame_001.npy
-    └── plots/
-        └── first_frame.png
+### 3) Gaussian lattice
+```bash
+python user_workflows/run_slm_andor.py \
+  --pattern gaussian-lattice \
+  --lattice-nx 8 \
+  --lattice-ny 6 \
+  --lattice-pitch-x 0.012 \
+  --lattice-pitch-y 0.012
 ```
 
 Useful optimization knobs for spot-based patterns:
