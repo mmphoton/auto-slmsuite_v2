@@ -83,6 +83,14 @@ python user_workflows/run_slm_andor.py --pattern gaussian-lattice --lattice-nx 8
 python user_workflows/run_slm_andor.py --pattern laguerre-gaussian --lg-l 2 --lg-p 1
 ```
 
+
+Pattern data can also be persisted from `run_slm_andor.py` with `--save-pattern-root`, using predictable names for downstream plotting:
+
+- `<pattern>-phase.npy`
+- `<pattern>-expected-farfield.npy` (written when available)
+- `<pattern>-target-descriptor.npz` containing `spots`, `centers`, and `radii` arrays
+- `<pattern>-artifact-<name>.npy` for each debug artifact array
+
 Useful optimization knobs for spot-based patterns:
 - `--holo-method` (default `WGS-Kim`)
 - `--holo-maxiter` (default `30`)
