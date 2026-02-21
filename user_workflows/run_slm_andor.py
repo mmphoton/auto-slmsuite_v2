@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import time
 from pathlib import Path
 
@@ -17,6 +18,13 @@ from slmsuite.holography.toolbox.phase import blaze
 from slmsuite.holography.toolbox import phase
 
 from user_workflows.calibration_io import assert_required_calibration_files
+from user_workflows.feedback.telemetry import (
+    FeedbackTelemetry,
+    StopConfig,
+    extract_spot_intensities,
+    metric_from_spots,
+    should_stop,
+)
 
 
 def load_phase_lut(path: Path, key: str = "deep") -> np.ndarray:
@@ -96,20 +104,113 @@ def hold_until_interrupt(slm, cam=None):
             cam.close()
 
 
-def run_feedback(fs: FourierSLM, iterations: int):
+def _save_checkpoint(checkpoint_dir: Path, iteration: int, phase_data: np.ndarray, frame: np.ndarray, save_farfield: bool):
+    np.save(checkpoint_dir / f"phase_iter_{iteration:04d}.npy", phase_data)
+    np.save(checkpoint_dir / f"cam_iter_{iteration:04d}.npy", frame)
+    if save_farfield:
+        farfield = np.abs(np.fft.fftshift(np.fft.fft2(np.exp(1j * phase_data))))
+        np.save(checkpoint_dir / f"farfield_iter_{iteration:04d}.npy", farfield)
+
+
+def _print_summary_table(metrics):
+    if not metrics:
+        print("No telemetry metrics recorded.")
+        return
+    best = max(metrics, key=lambda m: m.uniformity_min_max)
+    final = metrics[-1]
+    print("\nFeedback Summary")
+    print("iter | uniformity(min/max) | cv | objective | elapsed(s)")
+    print("-----+----------------------+----+-----------+----------")
+    print(
+        f"best {best.iteration:4d} | {best.uniformity_min_max:20.6f} | {best.coefficient_of_variation:0.6f}"
+        f" | {best.objective_value:0.6f} | {best.elapsed_time_s:0.2f}"
+    )
+    print(
+        f"final{final.iteration:4d} | {final.uniformity_min_max:20.6f} | {final.coefficient_of_variation:0.6f}"
+        f" | {final.objective_value:0.6f} | {final.elapsed_time_s:0.2f}"
+    )
+
+
+def run_feedback(fs: FourierSLM, args, run_dir: Path):
+    logger = logging.getLogger("feedback")
+    telemetry = FeedbackTelemetry(run_dir)
+    checkpoint_dir = run_dir / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    stop_cfg = StopConfig(
+        target_uniformity=args.target_uniformity,
+        max_no_improvement_iters=args.max_no_improvement_iters,
+        min_relative_improvement=args.min_relative_improvement,
+        max_runtime_s=args.max_runtime_s,
+    )
+
     img = fs.cam.get_image()
     target_ij = img.astype(float)
     peak = np.nanmax(target_ij)
     target_ij /= peak if peak > 0 else 1.0
 
     holo = FeedbackHologram(shape=fs.slm.shape, target_ij=target_ij, cameraslm=fs)
-    holo.optimize(
-        method="WGS-Kim",
-        feedback="experimental",
-        maxiter=int(iterations),
-        stat_groups=["experimental_ij", "computational"],
-    )
-    fs.slm.set_phase(holo.get_phase(include_propagation=True), settle=True)
+
+    best_uniformity = -np.inf
+    no_improvement_iters = 0
+    start_time = time.time()
+
+    for iteration in range(1, int(args.feedback_iters) + 1):
+        holo.optimize(
+            method="WGS-Kim",
+            feedback="experimental",
+            maxiter=1,
+            stat_groups=["experimental_ij", "computational"],
+        )
+        phase_data = holo.get_phase(include_propagation=True)
+        fs.slm.set_phase(phase_data, settle=True)
+        frame = fs.cam.get_image()
+
+        spots = extract_spot_intensities(frame)
+        metric = metric_from_spots(iteration=iteration, spot_values=spots, elapsed_time_s=time.time() - start_time)
+        telemetry.record(metric)
+
+        rel_improvement = (
+            (metric.uniformity_min_max - best_uniformity) / max(abs(best_uniformity), 1e-12)
+            if np.isfinite(best_uniformity)
+            else np.inf
+        )
+
+        if rel_improvement >= stop_cfg.min_relative_improvement:
+            best_uniformity = metric.uniformity_min_max
+            no_improvement_iters = 0
+            logger.info(
+                "iter=%s improvement accepted, uniformity=%.6f rel_improvement=%.6f",
+                iteration,
+                metric.uniformity_min_max,
+                rel_improvement,
+            )
+        else:
+            no_improvement_iters += 1
+            logger.warning(
+                "iter=%s no significant improvement, uniformity=%.6f rel_improvement=%.6f no_improvement_iters=%s",
+                iteration,
+                metric.uniformity_min_max,
+                rel_improvement,
+                no_improvement_iters,
+            )
+
+        _save_checkpoint(checkpoint_dir, iteration, phase_data, frame, args.save_farfield)
+
+        stop, reason = should_stop(
+            telemetry.metrics,
+            stop_cfg=stop_cfg,
+            no_improvement_iters=no_improvement_iters,
+            start_time_s=start_time,
+            now_s=time.time(),
+        )
+        if stop:
+            logger.info("Stopping early at iter=%s due to %s", iteration, reason)
+            break
+
+    csv_path, json_path = telemetry.save()
+    logger.info("Saved telemetry metrics to %s and %s", csv_path, json_path)
+    _print_summary_table(telemetry.metrics)
 
 
 def main():
@@ -160,10 +261,29 @@ def main():
     parser.add_argument("--frames", type=int, default=1, help="Number of full frames to acquire")
     parser.add_argument("--feedback", action="store_true", help="Run experimental feedback optimization")
     parser.add_argument("--feedback-iters", type=int, default=10)
+    parser.add_argument("--target-uniformity", type=float, default=0.95)
+    parser.add_argument("--max-no-improvement-iters", type=int, default=5)
+    parser.add_argument("--min-relative-improvement", type=float, default=1e-3)
+    parser.add_argument("--max-runtime-s", type=float, default=120.0)
+    parser.add_argument("--run-output-dir", default="feedback_runs/latest")
+    parser.add_argument("--save-farfield", action="store_true")
     parser.add_argument("--calibration-root", default="user_workflows/calibrations")
     parser.add_argument("--save-frames", default="", help="Optional .npy output path for acquired frames")
 
     args = parser.parse_args()
+
+    run_dir = Path(args.run_output_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+        handlers=[
+            logging.FileHandler(run_dir / "run.log", mode="w"),
+            logging.StreamHandler(),
+        ],
+    )
+    logger = logging.getLogger("run_slm_andor")
+    logger.info("Starting run with pattern=%s use_camera=%s feedback=%s", args.pattern, args.use_camera, args.feedback)
 
     slm = Holoeye(preselect="index:0")
     deep = load_phase_lut(Path(args.lut_file), args.lut_key)
@@ -172,6 +292,7 @@ def main():
     print(f"Pattern '{args.pattern}' displayed on SLM")
 
     if not args.use_camera:
+        logger.warning("Camera disabled; telemetry/feedback disabled")
         hold_until_interrupt(slm)
         return
 
@@ -191,7 +312,8 @@ def main():
     fs.slm.source["amplitude"] = np.load(calibration_paths["source_amplitude"])
 
     if args.feedback:
-        run_feedback(fs, iterations=args.feedback_iters)
+        logger.info("Starting feedback loop")
+        run_feedback(fs, args=args, run_dir=run_dir)
 
     frames = [cam.get_image() for _ in range(max(1, args.frames))]
     frames = np.asarray(frames)
@@ -203,6 +325,7 @@ def main():
         np.save(out, frames)
         print(f"Saved frames to {out.resolve()}")
 
+    logger.info("Run complete; entering hold mode")
     hold_until_interrupt(slm, cam=cam)
 
 
