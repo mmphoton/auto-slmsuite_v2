@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Mapping
 
 import numpy as np
 
 from user_workflows.graphical_app.app.interfaces import CameraInterface, SLMInterface
+
+
+class HardwareIntegrationError(NotImplementedError):
+    """Raised when hardware adapters are invoked without an integration backend."""
 
 
 @dataclass
@@ -78,9 +82,45 @@ class SimulatedCamera(CameraInterface):
         }
 
 
-class HardwareSLM(SimulatedSLM):
-    """Hardware wrapper placeholder with same interface for parity testing."""
+class HardwareSLM(SLMInterface):
+    """Explicit hardware adapter; wire to a real backend before hardware mode use."""
+
+    def __init__(self) -> None:
+        self.connected = False
+
+    def connect(self) -> None:
+        raise HardwareIntegrationError("Hardware SLM integration is not implemented.")
+
+    def disconnect(self) -> None:
+        self.connected = False
+
+    def apply_pattern(self, pattern: np.ndarray) -> None:
+        raise HardwareIntegrationError("Hardware SLM integration is not implemented.")
+
+    def queue_pattern(self, pattern: np.ndarray) -> None:
+        raise HardwareIntegrationError("Hardware SLM integration is not implemented.")
+
+    def clear_queue(self) -> None:
+        raise HardwareIntegrationError("Hardware SLM integration is not implemented.")
 
 
-class HardwareCamera(SimulatedCamera):
-    """Hardware wrapper placeholder with same interface for parity testing."""
+class HardwareCamera(CameraInterface):
+    """Explicit hardware adapter; wire to a real backend before hardware mode use."""
+
+    def __init__(self, _slm: SLMInterface) -> None:
+        self.connected = False
+
+    def connect(self) -> None:
+        raise HardwareIntegrationError("Hardware camera integration is not implemented.")
+
+    def disconnect(self) -> None:
+        self.connected = False
+
+    def configure(self, settings: Mapping[str, Any]) -> None:
+        raise HardwareIntegrationError("Hardware camera integration is not implemented.")
+
+    def acquire_frame(self) -> np.ndarray:
+        raise HardwareIntegrationError("Hardware camera integration is not implemented.")
+
+    def telemetry(self) -> Dict[str, Any]:
+        raise HardwareIntegrationError("Hardware camera integration is not implemented.")
