@@ -154,3 +154,33 @@ def test_optimization_controls_and_export(tmp_path):
     assert sidecar.exists()
     payload = c.persistence.load_json(sidecar)
     assert payload["run_metadata"]["run_id"] == "run-opt"
+
+
+def test_ratio_target_optimization_and_export(tmp_path):
+    c = AppController()
+    config = {
+        "wgs": {"max_iterations": 4, "gain": 0.1},
+        "ratio_mode": "simulation",
+        "target_definition": {
+            "beam_count": 3,
+            "beam_positions": [[32, 32], [64, 64], [96, 96]],
+            "desired_ratios": [0.2, 0.3, 0.5],
+            "lattice": {"geometry": "square", "spacing": 8.0, "rotation_deg": 0.0},
+        },
+        "ratio_targets": {"desired_ratios": [0.2, 0.3, 0.5]},
+        "objective_weights": {"intensity": 1.0, "ratio": 0.6, "regularization": 0.05},
+    }
+    result = c.start_optimization(config)
+    assert result.success
+    assert "ratio_metrics" in result.payload
+
+    ratio_plot = c.plots.get_plot_model("ratio_targets_vs_measured")
+    assert ratio_plot.data.shape[0] == 2
+
+    out = tmp_path / "ratio_history.csv"
+    exported = c.export_optimization_history(str(out))
+    assert exported.success
+    payload = c.persistence.load_json(out.with_suffix(".json"))
+    assert payload["ratio_mode"] == "simulation"
+    assert payload["target_definition"]["beam_count"] == 3
+    assert payload["objective_weights"]["ratio"] == 0.6

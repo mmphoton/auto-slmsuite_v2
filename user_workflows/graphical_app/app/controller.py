@@ -25,6 +25,7 @@ from user_workflows.graphical_app.calibration.tools import CalibrationProfile, C
 from user_workflows.graphical_app.devices.camera_settings import camera_settings_schema, parse_camera_settings
 from user_workflows.graphical_app.devices.manager import DeviceManager
 from user_workflows.graphical_app.optimization.runner import OptimizationRunner
+from user_workflows.graphical_app.optimization.targets import TargetDefinition
 from user_workflows.graphical_app.app.patterns import PatternService
 from user_workflows.graphical_app.persistence.store import PersistenceStore
 from user_workflows.graphical_app.plotting.backend import PlotBackend
@@ -195,6 +196,37 @@ class AppController:
         target /= max(float(target.max()), 1e-9)
         return target
 
+    def _update_ratio_visualizations(self, measured: np.ndarray, target_definition: TargetDefinition) -> dict[str, Any]:
+        h, w = measured.shape
+        desired = np.asarray(target_definition.desired_ratios, dtype=float)
+        desired = desired / max(float(np.sum(desired)), 1e-9)
+
+        samples = []
+        for x, y in target_definition.beam_positions:
+            xi = int(np.clip(round(x), 0, max(w - 1, 0)))
+            yi = int(np.clip(round(y), 0, max(h - 1, 0)))
+            samples.append(float(measured[yi, xi]))
+        measured_vec = np.asarray(samples, dtype=float)
+        measured_vec = measured_vec / max(float(np.sum(measured_vec)), 1e-9)
+
+        count = min(len(desired), len(measured_vec))
+        desired = desired[:count]
+        measured_vec = measured_vec[:count]
+        ratio_error = measured_vec - desired
+
+        ratio_bars = np.vstack([desired, measured_vec]) if count else np.zeros((2, 1), dtype=float)
+        ratio_error_trend = np.asarray(ratio_error, dtype=float)[None, :] if count else np.zeros((1, 1), dtype=float)
+        ratio_metrics = {
+            "mean_abs_error": float(np.mean(np.abs(ratio_error))) if count else 0.0,
+            "max_abs_error": float(np.max(np.abs(ratio_error))) if count else 0.0,
+            "beam_count": int(target_definition.beam_count),
+        }
+
+        self.plots.update("ratio_targets_vs_measured", ratio_bars)
+        self.plots.update("ratio_error_by_beam", ratio_error_trend)
+        self.plots.update("ratio_metrics", np.asarray([[ratio_metrics["mean_abs_error"], ratio_metrics["max_abs_error"]]], dtype=float))
+        return ratio_metrics
+
     def _optimization_feedback(self, candidate_phase: np.ndarray, _iteration: int) -> np.ndarray:
         self.devices.slm.apply_pattern(candidate_phase)
         if self.state.mode == Mode.HARDWARE:
@@ -294,15 +326,20 @@ class AppController:
             arr = np.array([[x["iteration"], x["objective"]] for x in hist], dtype=float) if hist else np.zeros((0, 2), dtype=float)
             self.plots.update("optimization_convergence", arr)
 
+            ratio_metrics = {}
             final_phase = self.optimizer.current_phase()
             if final_phase is not None:
                 self.plots.update("optimization_phase_after", final_phase)
                 self.plots.update("optimization_intensity_after", self._wgs_target_intensity(final_phase))
+                feedback = self.optimizer.last_feedback()
+                if feedback is not None:
+                    target_definition = TargetDefinition.from_config(config, fallback_shape=feedback.shape)
+                    ratio_metrics = self._update_ratio_visualizations(feedback, target_definition)
 
             progress = dict(self.optimizer.progress())
             self.state.update_task("optimization", int(progress.get("iteration", len(hist))), "Optimization complete")
             self.state.complete_task("optimization", "Optimization complete")
-            return {"history": hist, "progress": progress}
+            return {"history": hist, "progress": progress, "ratio_metrics": ratio_metrics}
 
         return self._run("run_optimization", _impl, "Optimization complete")
 
@@ -348,13 +385,15 @@ class AppController:
 
     def export_optimization_history(self, out_path: str) -> OperationResult:
         def _impl() -> Dict[str, Any]:
-            run_meta = {}
+            run_meta = {
+                "optimizer_snapshot": dict(self.state.settings_snapshots.optimizer),
+            }
             if self.state.active_run is not None:
-                run_meta = {
+                run_meta.update({
                     "run_id": self.state.active_run.run_id,
                     "mode": self.state.active_run.mode.value,
                     "parameters": dict(self.state.active_run.parameters),
-                }
+                })
             out = Path(out_path)
             self.optimizer.export_history(out, run_metadata=run_meta)
             return {"csv": str(out), "json": str(out.with_suffix(".json"))}
