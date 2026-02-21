@@ -1,0 +1,24 @@
+{
+  "hardware": {"use_camera": true, "frames": 5},
+  "pattern": {
+    "pattern_type": "gaussian-lattice",
+    "family_params": {
+      "lattice_nx": 6,
+      "lattice_ny": 6,
+      "lattice_pitch_x": 0.01,
+      "lattice_pitch_y": 0.01,
+      "holo_method": "WGS-Kim",
+      "holo_maxiter": 60
+    }
+  },
+  "feedback": {
+    "enabled": true,
+    "method": "WGS-Kim",
+    "maxiter": 25,
+    "stopping_thresholds": {"relative_error": 0.0005}
+  },
+  "output": {
+    "run_name": "lattice_feedback",
+    "save_options": {"save_frames": true, "frames_path": "frames.npy"}
+  }
+}
