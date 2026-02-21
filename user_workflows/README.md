@@ -1,102 +1,61 @@
-# User workflow files and calibration persistence
+# User workflow CLI and calibration persistence
 
-## First run without hardware (`--simulate`)
-Use simulation mode to validate pattern generation, feedback loops, and artifact outputs without an Andor camera or physical SLM.
+Use the unified CLI entrypoint:
 
-### 1) Simulated calibration
 ```bash
-python user_workflows/run_calibration.py \
-  --simulate \
-  --seed 7 \
-  --simulation-scenario two-spot-imbalance \
-  --phase-lut deep_1024.mat
+python user_workflows/cli.py workflow <subcommand> [...]
 ```
 
-### 2) Simulated pattern + feedback run
-```bash
-python user_workflows/run_slm_andor.py \
-  --simulate \
-  --pattern double-gaussian \
-  --feedback \
-  --seed 7 \
-  --simulation-scenario two-spot-imbalance \
-  --lut-file deep_1024.mat
-```
+Available subcommands:
+- `workflow calibrate`
+- `workflow pattern`
+- `workflow acquire`
+- `workflow feedback`
+- `workflow doctor`
 
-Simulation scenarios:
-- `two-spot-imbalance` (biased two-spot response)
-- `n-spot-lattice-nonuniform` (lattice intensity nonuniformity)
-- `high-noise-failure` (strong dark/read noise failure mode)
-
-Both simulated and hardware workflows write artifacts into the same calibration/output layout for parity.
+Each subcommand supports:
+- `--preset <name>` to load argument defaults from `user_workflows/presets.json`
+- `--preset-file <path>` to use a different profile file
+- `--dry-run` to validate config and file paths without touching hardware
 
 ## Calibration producer
-Run `run_calibration.py` first to generate the calibration artifacts consumed by all other run scripts.
-
-Hardware example:
 
 ```bash
-python user_workflows/run_calibration.py \
+python user_workflows/cli.py workflow calibrate \
   --factory my_lab.bootstrap:create_fourier_slm \
   --phase-lut /path/to/deep_1024.mat
 ```
 
-## Persistent file layout
-By default all outputs are written to:
-
-- `user_workflows/calibrations/phase-depth-lut.npy` — validated phase-depth LUT used for phase correction.
-- `user_workflows/calibrations/fourier-calibration.h5` — output of `FourierSLM.fourier_calibrate(...)` (or loaded equivalent).
-- `user_workflows/calibrations/wavefront-superpixel-calibration.h5` — output of `wavefront_calibrate_superpixel(...)`.
-- `user_workflows/calibrations/source-phase-corrected.npy` — processed source phase map (if available).
-- `user_workflows/calibrations/source-amplitude-corrected.npy` — processed source amplitude for WGS initialization.
-- `user_workflows/calibrations/andor_frames.npy` — default frame capture output for both hardware and simulation runs.
-- `user_workflows/calibrations/run-metadata.npy` — seed/simulation metadata for reproducibility.
-
-## Consumer scripts
-Consumer scripts must validate these files before execution and fail with explicit instructions if missing.
-
-- `test_working.py` now enforces this precondition via `user_workflows/calibration_io.py` and prints an actionable error telling you to run `python user_workflows/run_calibration.py`.
-
-When adding future `run_*.py` scripts, import and call:
-
-```python
-from user_workflows.calibration_io import assert_required_calibration_files
-assert_required_calibration_files("user_workflows/calibrations")
-```
-
-before interacting with hardware.
-
-## Andor image acquisition + feedback workflow
-Use `run_slm_andor.py` to:
-- keep the Andor CCD cooled to `-65C` while connected,
-- set shutter control to `auto`,
-- acquire full camera images of displayed SLM patterns,
-- optionally run camera-driven experimental feedback optimization,
-- or run identical pattern/feedback flow with `--simulate`.
-
-Hardware example:
+## Pattern/acquisition workflows
 
 ```bash
-python user_workflows/run_slm_andor.py \
-  --use-camera \
-  --feedback \
-  --feedback-iters 15
+# Display a pattern only
+python user_workflows/cli.py workflow pattern --pattern laguerre-gaussian
+
+# Display pattern and acquire frames
+python user_workflows/cli.py workflow acquire --pattern single-gaussian --frames 3
+
+# Run experimental camera feedback
+python user_workflows/cli.py workflow feedback --pattern gaussian-lattice --feedback-iters 15
 ```
 
-Simulation example:
+## Doctor checks
 
 ```bash
-python user_workflows/run_slm_andor.py \
-  --simulate \
-  --feedback \
-  --feedback-iters 15 \
-  --simulation-scenario high-noise-failure
+python user_workflows/cli.py workflow doctor
 ```
 
-### Pattern options in `run_slm_andor.py`
-You can select from four analytical pattern families using `--pattern`:
+The doctor command checks:
+- SDK import availability
+- camera discoverability
+- LUT file existence and shape
+- calibration artifact presence and compatibility
+- writable output directories
 
-- `single-gaussian` (single focused Gaussian-like spot)
-- `double-gaussian` (two Gaussian-like spots separated by `--double-sep-kxy`)
-- `gaussian-lattice` (rectangular lattice of Gaussian-like spots)
-- `laguerre-gaussian` (LG phase mode with `--lg-l`, `--lg-p`)
+All failures include an explicit "Fix" command/next step.
+
+## Backward compatibility
+
+Legacy scripts are still available as wrappers:
+- `python user_workflows/run_calibration.py ...`
+- `python user_workflows/run_slm_andor.py ...`
