@@ -190,6 +190,17 @@ class AppController:
             self.plots.update(key, value)
         return payload
 
+    def _wgs_target_intensity(self, phase: np.ndarray) -> np.ndarray:
+        target = np.abs(np.fft.fftshift(np.fft.fft2(np.exp(1j * phase))))
+        target /= max(float(target.max()), 1e-9)
+        return target
+
+    def _optimization_feedback(self, candidate_phase: np.ndarray, _iteration: int) -> np.ndarray:
+        self.devices.slm.apply_pattern(candidate_phase)
+        if self.state.mode == Mode.HARDWARE:
+            return self.devices.camera.acquire_frame()
+        return self._wgs_target_intensity(candidate_phase)
+
     def simulate_before_apply(self, pattern: np.ndarray) -> OperationResult:
         def _impl() -> Dict[str, np.ndarray]:
             composed_pattern = self._compose_pattern_with_blaze(pattern)
@@ -261,18 +272,66 @@ class AppController:
         return self._run("camera_telemetry", _impl, "Camera telemetry refreshed")
 
     def run_optimization(self, config: Mapping[str, Any]) -> OperationResult:
-        def _impl() -> None:
-            total = int(config.get("iterations", 20))
+        def _impl() -> Dict[str, Any]:
+            wgs = dict(config.get("wgs", {})) if isinstance(config.get("wgs"), Mapping) else {}
+            total = int(wgs.get("max_iterations", config.get("iterations", 20)))
             self.state.start_task("optimization", total=total, message="Optimization running")
             self.state.settings_snapshots.optimizer = dict(config)
-            self.optimizer.start(config)
+
+            initial_phase = self.devices.slm.active_pattern if hasattr(self.devices.slm, "active_pattern") else np.zeros((128, 128), dtype=float)
+            target = self._wgs_target_intensity(initial_phase)
+            self.plots.update("optimization_phase_before", initial_phase)
+            self.plots.update("optimization_intensity_before", self._wgs_target_intensity(initial_phase))
+
+            self.optimizer.start(
+                config,
+                initial_phase=initial_phase,
+                target_intensity=target,
+                feedback_provider=self._optimization_feedback,
+            )
+            self.optimizer.run_to_completion()
             hist = self.optimizer.history()
-            arr = np.array([[x["iteration"], x["objective"]] for x in hist], dtype=float)
+            arr = np.array([[x["iteration"], x["objective"]] for x in hist], dtype=float) if hist else np.zeros((0, 2), dtype=float)
             self.plots.update("optimization_convergence", arr)
-            self.state.update_task("optimization", len(hist), "Optimization complete")
+
+            final_phase = self.optimizer.current_phase()
+            if final_phase is not None:
+                self.plots.update("optimization_phase_after", final_phase)
+                self.plots.update("optimization_intensity_after", self._wgs_target_intensity(final_phase))
+
+            progress = dict(self.optimizer.progress())
+            self.state.update_task("optimization", int(progress.get("iteration", len(hist))), "Optimization complete")
             self.state.complete_task("optimization", "Optimization complete")
+            return {"history": hist, "progress": progress}
 
         return self._run("run_optimization", _impl, "Optimization complete")
+
+    def start_optimization(self, config: Mapping[str, Any]) -> OperationResult:
+        return self.run_optimization(config)
+
+    def pause_optimization(self) -> OperationResult:
+        def _impl() -> Dict[str, Any]:
+            self.optimizer.pause()
+            progress = dict(self.optimizer.progress())
+            self.state.update_task("optimization", int(progress.get("iteration", 0)), "Optimization paused")
+            return progress
+
+        return self._run("pause_optimization", _impl, "Optimization paused")
+
+    def resume_optimization(self) -> OperationResult:
+        def _impl() -> Dict[str, Any]:
+            self.optimizer.resume()
+            self.optimizer.run_to_completion()
+            hist = self.optimizer.history()
+            arr = np.array([[x["iteration"], x["objective"]] for x in hist], dtype=float) if hist else np.zeros((0, 2), dtype=float)
+            self.plots.update("optimization_convergence", arr)
+            progress = dict(self.optimizer.progress())
+            self.state.update_task("optimization", int(progress.get("iteration", len(hist))), "Optimization resumed")
+            if not progress.get("running", False):
+                self.state.complete_task("optimization", "Optimization complete")
+            return progress
+
+        return self._run("resume_optimization", _impl, "Optimization resumed")
 
     def cancel_optimization(self) -> OperationResult:
         def _impl() -> None:
@@ -280,6 +339,27 @@ class AppController:
             self.state.cancel_task("optimization")
 
         return self._run("cancel_optimization", _impl, "Optimization cancelled")
+
+    def stop_optimization(self) -> OperationResult:
+        return self.cancel_optimization()
+
+    def optimization_progress(self) -> OperationResult:
+        return self._run("optimization_progress", lambda: dict(self.optimizer.progress()), "Optimization progress fetched")
+
+    def export_optimization_history(self, out_path: str) -> OperationResult:
+        def _impl() -> Dict[str, Any]:
+            run_meta = {}
+            if self.state.active_run is not None:
+                run_meta = {
+                    "run_id": self.state.active_run.run_id,
+                    "mode": self.state.active_run.mode.value,
+                    "parameters": dict(self.state.active_run.parameters),
+                }
+            out = Path(out_path)
+            self.optimizer.export_history(out, run_metadata=run_meta)
+            return {"csv": str(out), "json": str(out.with_suffix(".json"))}
+
+        return self._run("export_optimization_history", _impl, "Optimization history exported")
 
     def run_calibration(self, profile_path: str) -> OperationResult:
         def _impl() -> Dict[str, Any]:
@@ -366,6 +446,8 @@ class AppController:
             "plot.simulated_intensity": True,
             "plot.experimental_intensity": True,
             "plot.optimization_convergence": True,
+            "plot.optimization_phase_before_after": True,
+            "plot.optimization_intensity_before_after": True,
             "optimizer.start_pause_resume_stop": True,
             "sequence.sync_run": True,
             "calibration.save_load_apply": True,

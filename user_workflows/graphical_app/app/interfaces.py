@@ -88,7 +88,13 @@ class PatternGeneratorInterface(ABC):
 
 class OptimizationRunnerInterface(ABC):
     @abstractmethod
-    def start(self, config: Mapping[str, Any]) -> None: ...
+    def start(
+        self,
+        config: Mapping[str, Any],
+        initial_phase: np.ndarray,
+        target_intensity: np.ndarray,
+        feedback_provider: Any | None = None,
+    ) -> None: ...
 
     @abstractmethod
     def pause(self) -> None: ...
@@ -98,6 +104,9 @@ class OptimizationRunnerInterface(ABC):
 
     @abstractmethod
     def stop(self) -> None: ...
+
+    @abstractmethod
+    def progress(self) -> Mapping[str, Any]: ...
 
     @abstractmethod
     def history(self) -> List[Mapping[str, float]]: ...
@@ -141,6 +150,8 @@ def feature_matrix_rows() -> Iterable[str]:
         "plot.simulated_intensity",
         "plot.experimental_intensity",
         "plot.optimization_convergence",
+        "plot.optimization_phase_before_after",
+        "plot.optimization_intensity_before_after",
         "optimizer.start_pause_resume_stop",
         "sequence.sync_run",
         "calibration.save_load_apply",

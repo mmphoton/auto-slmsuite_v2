@@ -297,7 +297,7 @@ class MainWindow(tk.Tk):
 
     def _build_plot_panel(self) -> None:
         frm = self._create_panel("Plots", "center")
-        self.plot_names = ["simulated_phase", "simulated_intensity", "experimental_intensity", "optimization_convergence"]
+        self.plot_names = ["simulated_phase", "simulated_intensity", "experimental_intensity", "optimization_convergence", "optimization_phase_before", "optimization_phase_after", "optimization_intensity_before", "optimization_intensity_after"]
         self.plot_select = tk.StringVar(value=self.plot_names[0])
         ttk.Combobox(frm, textvariable=self.plot_select, values=self.plot_names, state="readonly").pack(fill=tk.X)
         ttk.Button(frm, text="Pop-out Plot", command=self._bind_safe("pop_plot", self._pop_plot)).pack(fill=tk.X)
@@ -314,13 +314,28 @@ class MainWindow(tk.Tk):
 
     def _build_optimization_panel(self) -> None:
         frm = self._create_panel("Optimization", "left")
+        ttk.Label(frm, text="WGS max iterations").pack(anchor="w")
+        self.optimization_max_iters = tk.StringVar(value="20")
+        ttk.Entry(frm, textvariable=self.optimization_max_iters).pack(fill=tk.X)
+
+        ttk.Label(frm, text="WGS gain").pack(anchor="w")
+        self.optimization_gain = tk.StringVar(value="0.2")
+        ttk.Entry(frm, textvariable=self.optimization_gain).pack(fill=tk.X)
+
         self.optimization_settings = ttk.Entry(frm)
-        self.optimization_settings.insert(0, '{"iterations":20}')
+        self.optimization_settings.insert(0, '{"initial": 1.0}')
         self.optimization_settings.pack(fill=tk.X)
-        ttk.Button(frm, text="Run Optimization", command=self._bind_safe("run_optimization", self._run_optimization)).pack(fill=tk.X)
-        ttk.Button(frm, text="Cancel Optimization", command=self._bind_safe("cancel_optimization", lambda: self._handle_result(self.controller.cancel_optimization()))).pack(fill=tk.X)
+
+        ttk.Button(frm, text="Start", command=self._bind_safe("start_optimization", self._run_optimization)).pack(fill=tk.X)
+        ttk.Button(frm, text="Pause", command=self._bind_safe("pause_optimization", lambda: self._handle_result(self.controller.pause_optimization()))).pack(fill=tk.X)
+        ttk.Button(frm, text="Resume", command=self._bind_safe("resume_optimization", lambda: self._handle_result(self.controller.resume_optimization()))).pack(fill=tk.X)
+        ttk.Button(frm, text="Stop", command=self._bind_safe("stop_optimization", lambda: self._handle_result(self.controller.stop_optimization()))).pack(fill=tk.X)
+        ttk.Button(frm, text="Export History", command=self._bind_safe("export_optimization_history", self._export_optimization_history)).pack(fill=tk.X)
+
         self.optimization_progress = ttk.Progressbar(frm, orient=tk.HORIZONTAL, mode="determinate", maximum=100)
         self.optimization_progress.pack(fill=tk.X, pady=3)
+        self.optimization_progress_label = ttk.Label(frm, text="idle")
+        self.optimization_progress_label.pack(anchor="w")
 
     def _build_calibration_panel(self) -> None:
         frm = self._create_panel("Calibration", "right")
@@ -563,7 +578,16 @@ class MainWindow(tk.Tk):
                 self.temp_label.configure(foreground="black")
 
     def _run_optimization(self) -> None:
-        self._handle_result(self.controller.run_optimization(json.loads(self.optimization_settings.get())))
+        config = json.loads(self.optimization_settings.get())
+        config["wgs"] = {
+            "max_iterations": int(self.optimization_max_iters.get()),
+            "gain": float(self.optimization_gain.get()),
+        }
+        self._handle_result(self.controller.start_optimization(config))
+
+    def _export_optimization_history(self) -> None:
+        out = filedialog.asksaveasfilename(defaultextension=".csv") or "user_workflows/output/optimization_history.csv"
+        self._handle_result(self.controller.export_optimization_history(out))
 
     def _run_calibration(self) -> None:
         self._handle_result(self.controller.run_calibration(self.calibration_profile.get()))
@@ -603,6 +627,14 @@ class MainWindow(tk.Tk):
             else:
                 bar.configure(maximum=100)
                 bar["value"] = 0
+
+        opt = self.controller.optimization_progress()
+        if opt.success and isinstance(opt.payload, dict):
+            payload = opt.payload
+            pct = float(payload.get("percent", 0.0))
+            self.optimization_progress_label.configure(
+                text=f"iter {int(payload.get('iteration', 0))}/{int(payload.get('max_iterations', 0))} ({pct:.1f}%)"
+            )
 
     def _schedule_progress_refresh(self) -> None:
         self._safe_callback("progress_refresh", self._refresh_progress_widgets)
