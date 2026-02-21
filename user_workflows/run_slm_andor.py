@@ -15,7 +15,11 @@ from slmsuite.hardware.slms.holoeye import Holoeye
 from slmsuite.holography.algorithms import FeedbackHologram
 
 from user_workflows.calibration_io import assert_required_calibration_files
-from user_workflows.patterns import get_pattern, list_patterns
+from user_workflows.patterns.schemas import (
+    PatternValidationError,
+    pattern_field_descriptions,
+    pattern_params_from_flat_dict,
+)
 
 
 def load_phase_lut(path: Path, key: str = "deep") -> np.ndarray:
@@ -35,10 +39,50 @@ def _depth_correct(phi, deep):
     return np.mod(corrected, 2 * np.pi)
 
 
-def build_pattern(config, slm, deep):
-    """Build a registered user-selectable analytical pattern."""
-    pattern_factory = get_pattern(config.pattern.name)
-    return pattern_factory(config, slm, deep, _depth_correct)
+def build_pattern(args, slm, deep):
+    """Build one of several user-selectable analytical pattern families."""
+    params = pattern_params_from_flat_dict(args.pattern, vars(args))
+
+    if args.pattern == "laguerre-gaussian":
+        lg_phase = phase.laguerre_gaussian(slm, l=params.l, p=params.p)
+        phi = np.mod(lg_phase + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
+        return _depth_correct(phi, deep)
+
+    # Spot-based patterns use hologram optimization so users get Gaussian-like focused spots.
+    shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+
+    if args.pattern == "single-gaussian":
+        spot_kxy = np.array([[params.kx], [params.ky]])
+        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
+    elif args.pattern == "double-gaussian":
+        dx = float(params.sep_kxy) / 2.0
+        spot_kxy = np.array(
+            [
+                [params.center_kx - dx, params.center_kx + dx],
+                [params.center_ky, params.center_ky],
+            ]
+        )
+        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
+    elif args.pattern == "gaussian-lattice":
+        hologram = SpotHologram.make_rectangular_array(
+            shape,
+            array_shape=(params.nx, params.ny),
+            array_pitch=(params.pitch_x, params.pitch_y),
+            array_center=(params.center_kx, params.center_ky),
+            basis="kxy",
+            cameraslm=slm,
+        )
+    else:
+        raise ValueError(f"Unknown pattern '{args.pattern}'")
+
+    hologram.optimize(
+        method=args.holo_method,
+        maxiter=args.holo_maxiter,
+        feedback="computational",
+        stat_groups=["computational"],
+    )
+    phi = np.mod(hologram.get_phase(), 2 * np.pi)
+    return _depth_correct(phi, deep)
 
 
 def hold_until_interrupt(slm, cam=None):
@@ -115,25 +159,29 @@ def main():
     parser.add_argument("--blaze-ky", type=float, default=0.0045)
 
     # LG params
-    parser.add_argument("--lg-l", type=int, default=3)
-    parser.add_argument("--lg-p", type=int, default=0)
+    lg_help = pattern_field_descriptions("laguerre-gaussian")
+    parser.add_argument("--lg-l", type=int, default=3, help=lg_help["l"])
+    parser.add_argument("--lg-p", type=int, default=0, help=lg_help["p"])
 
     # Single gaussian spot params.
-    parser.add_argument("--single-kx", type=float, default=0.0)
-    parser.add_argument("--single-ky", type=float, default=0.0)
+    single_help = pattern_field_descriptions("single-gaussian")
+    parser.add_argument("--single-kx", type=float, default=0.0, help=single_help["kx"])
+    parser.add_argument("--single-ky", type=float, default=0.0, help=single_help["ky"])
 
     # Two gaussian spot params.
-    parser.add_argument("--double-center-kx", type=float, default=0.0)
-    parser.add_argument("--double-center-ky", type=float, default=0.0)
-    parser.add_argument("--double-sep-kxy", type=float, default=0.02, help="Separation in kxy units")
+    double_help = pattern_field_descriptions("double-gaussian")
+    parser.add_argument("--double-center-kx", type=float, default=0.0, help=double_help["center_kx"])
+    parser.add_argument("--double-center-ky", type=float, default=0.0, help=double_help["center_ky"])
+    parser.add_argument("--double-sep-kxy", type=float, default=0.02, help=double_help["sep_kxy"])
 
     # Lattice params.
-    parser.add_argument("--lattice-nx", type=int, default=5)
-    parser.add_argument("--lattice-ny", type=int, default=5)
-    parser.add_argument("--lattice-pitch-x", type=float, default=0.01)
-    parser.add_argument("--lattice-pitch-y", type=float, default=0.01)
-    parser.add_argument("--lattice-center-kx", type=float, default=0.0)
-    parser.add_argument("--lattice-center-ky", type=float, default=0.0)
+    lattice_help = pattern_field_descriptions("gaussian-lattice")
+    parser.add_argument("--lattice-nx", type=int, default=5, help=lattice_help["nx"])
+    parser.add_argument("--lattice-ny", type=int, default=5, help=lattice_help["ny"])
+    parser.add_argument("--lattice-pitch-x", type=float, default=0.01, help=lattice_help["pitch_x"])
+    parser.add_argument("--lattice-pitch-y", type=float, default=0.01, help=lattice_help["pitch_y"])
+    parser.add_argument("--lattice-center-kx", type=float, default=0.0, help=lattice_help["center_kx"])
+    parser.add_argument("--lattice-center-ky", type=float, default=0.0, help=lattice_help["center_ky"])
 
     # Hologram optimization knobs.
     parser.add_argument("--holo-method", default="WGS-Kim")
@@ -161,6 +209,11 @@ def main():
         camera=camera_mode,
         metadata={"workflow": "run_slm_andor"},
     )
+
+    try:
+        pattern_params_from_flat_dict(args.pattern, vars(args))
+    except PatternValidationError as exc:
+        parser.error(str(exc))
 
     slm = Holoeye(preselect="index:0")
     deep = load_phase_lut(Path(args.lut_file), args.lut_key)

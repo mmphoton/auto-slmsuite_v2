@@ -1,6 +1,21 @@
-"""Pattern registry package for user workflow SLM scripts."""
+"""Pattern parameter schemas and parsing helpers."""
 
-from user_workflows.patterns import defaults as _defaults  # noqa: F401
-from user_workflows.patterns.registry import get_pattern, list_patterns, register_lazy_pattern, register_pattern
+from .schemas import (
+    DoubleGaussianParams,
+    GaussianLatticeParams,
+    LaguerreGaussianParams,
+    PatternValidationError,
+    SingleGaussianParams,
+    pattern_field_descriptions,
+    pattern_params_from_flat_dict,
+)
 
-__all__ = ["register_pattern", "register_lazy_pattern", "get_pattern", "list_patterns"]
+__all__ = [
+    "SingleGaussianParams",
+    "DoubleGaussianParams",
+    "GaussianLatticeParams",
+    "LaguerreGaussianParams",
+    "PatternValidationError",
+    "pattern_params_from_flat_dict",
+    "pattern_field_descriptions",
+]
