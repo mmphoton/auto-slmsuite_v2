@@ -28,3 +28,7 @@ python user_workflows/run_gui_app.py
 
 ### Spyder / IDE launch note
 If you run `run_gui_app.py` directly from inside the `user_workflows/` folder, the launcher now bootstraps the repository root onto `sys.path`, so `user_workflows` imports resolve correctly.
+
+## QA governance
+
+Phase planning, done criteria, branch flow, and feature-to-test mapping are maintained in `user_workflows/graphical_app/qa/gui_capability_checklist.md`.
