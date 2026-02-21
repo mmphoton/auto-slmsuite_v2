@@ -8,6 +8,8 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 
 from user_workflows.graphical_app.app.controller import AppController
+from user_workflows.graphical_app.app.interfaces import OperationResult
+from user_workflows.graphical_app.app.state import LogLevel
 
 
 class MainWindow(tk.Tk):
@@ -35,9 +37,33 @@ class MainWindow(tk.Tk):
         self.main_pane.add(self.center, weight=2)
         self.main_pane.add(self.right, weight=1)
 
+        self.status_var = tk.StringVar(value="Ready")
         self._build_all_panels()
+        ttk.Label(self, textvariable=self.status_var, anchor="w").pack(fill=tk.X, padx=4, pady=2)
+
         self.restore_layout()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.after(800, self._schedule_progress_refresh)
+
+    def _safe_callback(self, callback_name: str, fn) -> None:
+        try:
+            fn()
+        except Exception as exc:
+            message = f"{callback_name} error: {exc}"
+            self.status_var.set(message)
+            self.controller.state.notify(message)
+            self.controller.state.add_log(LogLevel.ERROR, message, source="ui")
+            self._refresh_logs()
+
+    def _bind_safe(self, callback_name: str, fn):
+        return lambda: self._safe_callback(callback_name, fn)
+
+    def _handle_result(self, result: OperationResult) -> None:
+        self.status_var.set(result.message)
+        if not result.success:
+            self.controller.state.notify(result.message)
+        self._refresh_logs()
+        self._refresh_progress_widgets()
 
     def _build_all_panels(self) -> None:
         self._build_device_panel()
@@ -58,14 +84,14 @@ class MainWindow(tk.Tk):
     def _build_device_panel(self) -> None:
         frm = self._create_panel("Device", "left")
         self.mode = tk.StringVar(value="simulation")
-        ttk.Radiobutton(frm, text="Simulation", variable=self.mode, value="simulation", command=self._set_mode).pack(anchor="w")
-        ttk.Radiobutton(frm, text="Hardware", variable=self.mode, value="hardware", command=self._set_mode).pack(anchor="w")
-        ttk.Button(frm, text="Discover", command=self.controller.discover_devices).pack(fill=tk.X)
-        ttk.Button(frm, text="Connect", command=self.controller.connect_devices).pack(fill=tk.X)
-        ttk.Button(frm, text="Reconnect", command=self.controller.reconnect_devices).pack(fill=tk.X)
-        ttk.Button(frm, text="Release SLM", command=self.controller.release_slm).pack(fill=tk.X)
-        ttk.Button(frm, text="Release Camera", command=self.controller.release_camera).pack(fill=tk.X)
-        ttk.Button(frm, text="Release Both", command=self.controller.release_both).pack(fill=tk.X)
+        ttk.Radiobutton(frm, text="Simulation", variable=self.mode, value="simulation", command=self._bind_safe("set_mode", self._set_mode)).pack(anchor="w")
+        ttk.Radiobutton(frm, text="Hardware", variable=self.mode, value="hardware", command=self._bind_safe("set_mode", self._set_mode)).pack(anchor="w")
+        ttk.Button(frm, text="Discover", command=self._bind_safe("discover_devices", lambda: self._handle_result(self.controller.discover_devices()))).pack(fill=tk.X)
+        ttk.Button(frm, text="Connect", command=self._bind_safe("connect_devices", lambda: self._handle_result(self.controller.connect_devices()))).pack(fill=tk.X)
+        ttk.Button(frm, text="Reconnect", command=self._bind_safe("reconnect_devices", lambda: self._handle_result(self.controller.reconnect_devices()))).pack(fill=tk.X)
+        ttk.Button(frm, text="Release SLM", command=self._bind_safe("release_slm", lambda: self._handle_result(self.controller.release_slm()))).pack(fill=tk.X)
+        ttk.Button(frm, text="Release Camera", command=self._bind_safe("release_camera", lambda: self._handle_result(self.controller.release_camera()))).pack(fill=tk.X)
+        ttk.Button(frm, text="Release Both", command=self._bind_safe("release_both", lambda: self._handle_result(self.controller.release_both()))).pack(fill=tk.X)
 
     def _build_slm_panel(self) -> None:
         frm = self._create_panel("SLM", "center")
@@ -75,34 +101,37 @@ class MainWindow(tk.Tk):
         self.param_entry = ttk.Entry(frm)
         self.param_entry.insert(0, '{"kx":0.0,"ky":0.01}')
         self.param_entry.pack(fill=tk.X)
-        ttk.Button(frm, text="Simulate Before Apply", command=self._simulate).pack(fill=tk.X)
-        ttk.Button(frm, text="Apply", command=self._apply).pack(fill=tk.X)
-        ttk.Button(frm, text="Queue", command=self._queue).pack(fill=tk.X)
-        ttk.Button(frm, text="Clear Queue", command=self.controller.clear_pattern_queue).pack(fill=tk.X)
+        ttk.Button(frm, text="Simulate Before Apply", command=self._bind_safe("simulate", self._simulate)).pack(fill=tk.X)
+        ttk.Button(frm, text="Apply", command=self._bind_safe("apply", self._apply)).pack(fill=tk.X)
+        ttk.Button(frm, text="Queue", command=self._bind_safe("queue", self._queue)).pack(fill=tk.X)
+        ttk.Button(frm, text="Clear Queue", command=self._bind_safe("clear_queue", lambda: self._handle_result(self.controller.clear_pattern_queue()))).pack(fill=tk.X)
 
     def _build_camera_panel(self) -> None:
         frm = self._create_panel("Camera", "right")
         self.camera_settings = ttk.Entry(frm)
         self.camera_settings.insert(0, '{"exposure_ms":10,"gain":1.0,"roi":[0,0,128,128],"binning":1,"trigger":"internal","fps":30,"acquisition_mode":"single"}')
         self.camera_settings.pack(fill=tk.X)
-        ttk.Button(frm, text="Apply Camera Settings", command=self._configure_camera).pack(fill=tk.X)
+        ttk.Button(frm, text="Apply Camera Settings", command=self._bind_safe("configure_camera", self._configure_camera)).pack(fill=tk.X)
         self.temp_label = ttk.Label(frm, text="Temperature: n/a")
         self.temp_label.pack(anchor="w")
-        ttk.Button(frm, text="Refresh Telemetry", command=self._telemetry).pack(fill=tk.X)
+        ttk.Button(frm, text="Refresh Telemetry", command=self._bind_safe("telemetry", self._telemetry)).pack(fill=tk.X)
 
     def _build_plot_panel(self) -> None:
         frm = self._create_panel("Plots", "center")
         self.plot_select = tk.StringVar(value="simulated_phase")
         ttk.Combobox(frm, textvariable=self.plot_select, values=["simulated_phase", "simulated_intensity", "experimental_intensity", "optimization_convergence"]).pack(fill=tk.X)
-        ttk.Button(frm, text="Pop-out Plot", command=self._pop_plot).pack(fill=tk.X)
-        ttk.Button(frm, text="Export Plot", command=self._export_plot).pack(fill=tk.X)
+        ttk.Button(frm, text="Pop-out Plot", command=self._bind_safe("pop_plot", self._pop_plot)).pack(fill=tk.X)
+        ttk.Button(frm, text="Export Plot", command=self._bind_safe("export_plot", self._export_plot)).pack(fill=tk.X)
 
     def _build_optimization_panel(self) -> None:
         frm = self._create_panel("Optimization", "left")
         self.optimization_settings = ttk.Entry(frm)
         self.optimization_settings.insert(0, '{"iterations":20}')
         self.optimization_settings.pack(fill=tk.X)
-        ttk.Button(frm, text="Run Optimization", command=self._run_optimization).pack(fill=tk.X)
+        ttk.Button(frm, text="Run Optimization", command=self._bind_safe("run_optimization", self._run_optimization)).pack(fill=tk.X)
+        ttk.Button(frm, text="Cancel Optimization", command=self._bind_safe("cancel_optimization", lambda: self._handle_result(self.controller.cancel_optimization()))).pack(fill=tk.X)
+        self.optimization_progress = ttk.Progressbar(frm, orient=tk.HORIZONTAL, mode="determinate", maximum=100)
+        self.optimization_progress.pack(fill=tk.X, pady=3)
 
     def _build_calibration_panel(self) -> None:
         frm = self._create_panel("Calibration", "right")
@@ -110,33 +139,51 @@ class MainWindow(tk.Tk):
         self.calibration_profile = ttk.Entry(frm)
         self.calibration_profile.insert(0, "user_workflows/output/calibration_profile.json")
         self.calibration_profile.pack(fill=tk.X)
-        ttk.Button(frm, text="Save Placeholder Profile", command=self._save_calibration_profile).pack(fill=tk.X)
+        ttk.Button(frm, text="Run Calibration", command=self._bind_safe("run_calibration", self._run_calibration)).pack(fill=tk.X)
+        ttk.Button(frm, text="Cancel Calibration", command=self._bind_safe("cancel_calibration", lambda: self._handle_result(self.controller.cancel_calibration()))).pack(fill=tk.X)
+        ttk.Button(frm, text="Save Placeholder Profile", command=self._bind_safe("save_profile", self._save_calibration_profile)).pack(fill=tk.X)
+        self.calibration_progress = ttk.Progressbar(frm, orient=tk.HORIZONTAL, mode="determinate", maximum=100)
+        self.calibration_progress.pack(fill=tk.X, pady=3)
 
     def _build_logs_panel(self) -> None:
         frm = self._create_panel("Logs", "left")
-        self.log_text = tk.Text(frm, height=8)
-        self.log_text.pack(fill=tk.BOTH, expand=True)
-        ttk.Button(frm, text="Refresh Logs", command=self._refresh_logs).pack(fill=tk.X)
+        columns = ("timestamp", "level", "source", "message")
+        self.log_tree = ttk.Treeview(frm, columns=columns, show="headings", height=10)
+        for col, width in (("timestamp", 150), ("level", 90), ("source", 100), ("message", 420)):
+            self.log_tree.heading(col, text=col.title())
+            self.log_tree.column(col, width=width, anchor="w")
+        self.log_tree.pack(fill=tk.BOTH, expand=True)
+        ttk.Button(frm, text="Refresh Logs", command=self._bind_safe("refresh_logs", self._refresh_logs)).pack(fill=tk.X)
 
     def _build_session_panel(self) -> None:
         frm = self._create_panel("Session", "right")
-        ttk.Button(frm, text="Save Layout", command=self.save_layout).pack(fill=tk.X)
-        ttk.Button(frm, text="Restore Layout", command=self.restore_layout).pack(fill=tk.X)
-        ttk.Button(frm, text="Reset Layout", command=self._reset_layout).pack(fill=tk.X)
-        ttk.Button(frm, text="Save Session Snapshot", command=self._save_snapshot).pack(fill=tk.X)
+        ttk.Button(frm, text="Save Layout", command=self._bind_safe("save_layout", self.save_layout)).pack(fill=tk.X)
+        ttk.Button(frm, text="Restore Layout", command=self._bind_safe("restore_layout", self.restore_layout)).pack(fill=tk.X)
+        ttk.Button(frm, text="Reset Layout", command=self._bind_safe("reset_layout", self._reset_layout)).pack(fill=tk.X)
+        ttk.Button(frm, text="Save Session Snapshot", command=self._bind_safe("save_snapshot", self._save_snapshot)).pack(fill=tk.X)
+
+        ttk.Separator(frm, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=4)
+        ttk.Label(frm, text="Sequence JSON:").pack(anchor="w")
+        self.sequence_entry = ttk.Entry(frm)
+        self.sequence_entry.insert(0, '[{"pattern":"single-gaussian","duration_ms":25},{"pattern":"blaze","duration_ms":30}]')
+        self.sequence_entry.pack(fill=tk.X)
+        ttk.Button(frm, text="Run Sequence", command=self._bind_safe("run_sequence", self._run_sequence)).pack(fill=tk.X)
+        ttk.Button(frm, text="Cancel Sequence", command=self._bind_safe("cancel_sequence", lambda: self._handle_result(self.controller.cancel_sequence()))).pack(fill=tk.X)
+        self.sequence_progress = ttk.Progressbar(frm, orient=tk.HORIZONTAL, mode="determinate", maximum=100)
+        self.sequence_progress.pack(fill=tk.X, pady=3)
 
         ttk.Separator(frm, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=4)
         self.arrange_panel = tk.StringVar(value=self.PANEL_NAMES[0])
         ttk.Combobox(frm, textvariable=self.arrange_panel, values=self.PANEL_NAMES, state="readonly").pack(fill=tk.X)
         self.target_column = tk.StringVar(value="left")
         ttk.Combobox(frm, textvariable=self.target_column, values=["left", "center", "right"], state="readonly").pack(fill=tk.X)
-        ttk.Button(frm, text="Move To Column", command=self._move_selected_panel_to_column).pack(fill=tk.X)
-        ttk.Button(frm, text="Move Up", command=lambda: self._move_selected_panel(-1)).pack(fill=tk.X)
-        ttk.Button(frm, text="Move Down", command=lambda: self._move_selected_panel(1)).pack(fill=tk.X)
+        ttk.Button(frm, text="Move To Column", command=self._bind_safe("move_to_column", self._move_selected_panel_to_column)).pack(fill=tk.X)
+        ttk.Button(frm, text="Move Up", command=self._bind_safe("move_panel_up", lambda: self._move_selected_panel(-1))).pack(fill=tk.X)
+        ttk.Button(frm, text="Move Down", command=self._bind_safe("move_panel_down", lambda: self._move_selected_panel(1))).pack(fill=tk.X)
 
         self.swap_with = tk.StringVar(value=self.PANEL_NAMES[1])
         ttk.Combobox(frm, textvariable=self.swap_with, values=self.PANEL_NAMES, state="readonly").pack(fill=tk.X)
-        ttk.Button(frm, text="Swap Panels", command=self._swap_panels).pack(fill=tk.X)
+        ttk.Button(frm, text="Swap Panels", command=self._bind_safe("swap_panels", self._swap_panels)).pack(fill=tk.X)
 
         ttk.Label(frm, text="Visibility").pack(anchor="w")
         for panel_name in self.PANEL_NAMES:
@@ -144,47 +191,59 @@ class MainWindow(tk.Tk):
                 frm,
                 text=panel_name,
                 variable=self.visibility_vars[panel_name],
-                command=self._apply_visibility,
+                command=self._bind_safe("apply_visibility", self._apply_visibility),
             ).pack(anchor="w")
 
         ttk.Separator(frm, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=4)
-        ttk.Button(frm, text="Preset: Acquisition", command=lambda: self._apply_preset("Acquisition")).pack(fill=tk.X)
-        ttk.Button(frm, text="Preset: Optimization", command=lambda: self._apply_preset("Optimization")).pack(fill=tk.X)
-        ttk.Button(frm, text="Preset: Calibration", command=lambda: self._apply_preset("Calibration")).pack(fill=tk.X)
+        ttk.Button(frm, text="Preset: Acquisition", command=self._bind_safe("preset_acquisition", lambda: self._apply_preset("Acquisition"))).pack(fill=tk.X)
+        ttk.Button(frm, text="Preset: Optimization", command=self._bind_safe("preset_optimization", lambda: self._apply_preset("Optimization"))).pack(fill=tk.X)
+        ttk.Button(frm, text="Preset: Calibration", command=self._bind_safe("preset_calibration", lambda: self._apply_preset("Calibration"))).pack(fill=tk.X)
 
     def _set_mode(self) -> None:
-        self.controller.set_mode(self.mode.get())
+        self._handle_result(self.controller.set_mode(self.mode.get()))
 
     def _simulate(self) -> None:
         params = json.loads(self.param_entry.get())
         pattern_result = self.controller.generate_pattern(self.pattern_name.get(), params)
+        self._handle_result(pattern_result)
         if pattern_result.success and pattern_result.payload is not None:
-            self.controller.simulate_before_apply(pattern_result.payload)
+            self._handle_result(self.controller.simulate_before_apply(pattern_result.payload))
 
     def _apply(self) -> None:
         params = json.loads(self.param_entry.get())
         pattern_result = self.controller.generate_pattern(self.pattern_name.get(), params)
+        self._handle_result(pattern_result)
         if pattern_result.success and pattern_result.payload is not None:
-            self.controller.apply_pattern(pattern_result.payload)
+            self._handle_result(self.controller.apply_pattern(pattern_result.payload))
 
     def _queue(self) -> None:
         params = json.loads(self.param_entry.get())
         pattern_result = self.controller.generate_pattern(self.pattern_name.get(), params)
+        self._handle_result(pattern_result)
         if pattern_result.success and pattern_result.payload is not None:
-            self.controller.queue_pattern(pattern_result.payload)
+            self._handle_result(self.controller.queue_pattern(pattern_result.payload))
 
     def _configure_camera(self) -> None:
-        self.controller.configure_camera(json.loads(self.camera_settings.get()))
+        self._handle_result(self.controller.configure_camera(json.loads(self.camera_settings.get())))
 
     def _telemetry(self) -> None:
         telem_result = self.controller.camera_telemetry()
+        self._handle_result(telem_result)
         if telem_result.success and isinstance(telem_result.payload, dict):
-            temp = telem_result.payload["temperature_c"]
-            warn = " ⚠" if temp > -55 else ""
-            self.temp_label.configure(text=f"Temperature: {temp:.2f} C{warn}")
+            temp = float(telem_result.payload.get("temperature_c", 0.0))
+            temp_status = telem_result.payload.get("temperature_status", "unknown")
+            warn = " ⚠" if temp_status in {"warning", "critical"} else ""
+            self.temp_label.configure(text=f"Temperature: {temp:.2f} C ({temp_status}){warn}")
 
     def _run_optimization(self) -> None:
-        self.controller.run_optimization(json.loads(self.optimization_settings.get()))
+        self._handle_result(self.controller.run_optimization(json.loads(self.optimization_settings.get())))
+
+    def _run_calibration(self) -> None:
+        self._handle_result(self.controller.run_calibration(self.calibration_profile.get()))
+
+    def _run_sequence(self) -> None:
+        steps = json.loads(self.sequence_entry.get())
+        self._handle_result(self.controller.run_sequence(steps))
 
     def _save_calibration_profile(self) -> None:
         path = Path(self.calibration_profile.get())
@@ -196,11 +255,31 @@ class MainWindow(tk.Tk):
             "matrix": [[1.0, 0.0], [0.0, 1.0]],
         }
         self.store.save_json(path, profile)
+        self.status_var.set(f"Saved placeholder profile to {path}")
 
     def _refresh_logs(self) -> None:
-        self.log_text.delete("1.0", tk.END)
-        for entry in self.controller.state.logs[-200:]:
-            self.log_text.insert(tk.END, f"[{entry.level.value}] {entry.source}: {entry.message}\n")
+        for item in self.log_tree.get_children():
+            self.log_tree.delete(item)
+        for entry in self.controller.state.logs[-300:]:
+            self.log_tree.insert("", tk.END, values=(entry.timestamp, entry.level.value.upper(), entry.source, entry.message))
+
+    def _refresh_progress_widgets(self) -> None:
+        for name, bar in (
+            ("optimization", self.optimization_progress),
+            ("calibration", self.calibration_progress),
+            ("sequence", self.sequence_progress),
+        ):
+            progress = self.controller.state.task_progress[name]
+            if progress.total > 0:
+                bar.configure(maximum=progress.total)
+                bar["value"] = min(progress.current, progress.total)
+            else:
+                bar.configure(maximum=100)
+                bar["value"] = 0
+
+    def _schedule_progress_refresh(self) -> None:
+        self._safe_callback("progress_refresh", self._refresh_progress_widgets)
+        self.after(800, self._schedule_progress_refresh)
 
     def _pop_plot(self) -> None:
         self._open_plot_popout(self.plot_select.get())
@@ -224,10 +303,10 @@ class MainWindow(tk.Tk):
 
     def _export_plot(self) -> None:
         output = filedialog.askdirectory() or "user_workflows/output"
-        self.controller.export_plot(self.plot_select.get(), output)
+        self._handle_result(self.controller.export_plot(self.plot_select.get(), output))
 
     def _save_snapshot(self) -> None:
-        self.controller.save_session_snapshot("user_workflows/output/session_snapshot.json")
+        self._handle_result(self.controller.save_session_snapshot("user_workflows/output/session_snapshot.json"))
 
     def _move_selected_panel_to_column(self) -> None:
         panel_name = self.arrange_panel.get()
