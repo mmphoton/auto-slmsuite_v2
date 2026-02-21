@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import time
+from dataclasses import dataclass, fields
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import scipy.io
@@ -36,50 +39,220 @@ def _depth_correct(phi, deep):
     return np.mod(corrected, 2 * np.pi)
 
 
-def build_pattern(args, slm, deep):
-    """Build one of several user-selectable analytical pattern families."""
-    ny, nx = slm.shape
+@dataclass
+class PatternContext:
+    slm: Any
+    deep: np.ndarray
+    holo_method: str
+    holo_maxiter: int
 
-    if args.pattern == "laguerre-gaussian":
-        lg_phase = phase.laguerre_gaussian(slm, l=args.lg_l, p=args.lg_p)
-        phi = np.mod(lg_phase + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
-        return _depth_correct(phi, deep)
 
-    # Spot-based patterns use hologram optimization so users get Gaussian-like focused spots.
-    shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+@dataclass
+class PatternResult:
+    phase: np.ndarray
+    metadata: dict[str, Any]
 
-    if args.pattern == "single-gaussian":
-        spot_kxy = np.array([[args.single_kx], [args.single_ky]])
-        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
-    elif args.pattern == "double-gaussian":
-        dx = float(args.double_sep_kxy) / 2.0
-        spot_kxy = np.array(
-            [
-                [args.double_center_kx - dx, args.double_center_kx + dx],
-                [args.double_center_ky, args.double_center_ky],
-            ]
-        )
-        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
-    elif args.pattern == "gaussian-lattice":
-        hologram = SpotHologram.make_rectangular_array(
-            shape,
-            array_shape=(args.lattice_nx, args.lattice_ny),
-            array_pitch=(args.lattice_pitch_x, args.lattice_pitch_y),
-            array_center=(args.lattice_center_kx, args.lattice_center_ky),
-            basis="kxy",
-            cameraslm=slm,
-        )
-    else:
-        raise ValueError(f"Unknown pattern '{args.pattern}'")
 
+@dataclass
+class LaguerreGaussianParams:
+    l: int
+    p: int
+    blaze_kx: float
+    blaze_ky: float
+
+
+@dataclass
+class SingleGaussianParams:
+    kx: float
+    ky: float
+
+
+@dataclass
+class DoubleGaussianParams:
+    center_kx: float
+    center_ky: float
+    sep_kxy: float
+
+
+@dataclass
+class GaussianLatticeParams:
+    nx: int
+    ny: int
+    pitch_x: float
+    pitch_y: float
+    center_kx: float
+    center_ky: float
+
+
+class PatternDefinition:
+    def __init__(self, name: str, schema_cls, build_fn):
+        self.name = name
+        self.schema_cls = schema_cls
+        self.build = build_fn
+
+    def validate_params(self, raw_params: dict[str, Any]):
+        allowed_fields = {f.name for f in fields(self.schema_cls)}
+        unknown_fields = sorted(set(raw_params) - allowed_fields)
+        if unknown_fields:
+            raise ValueError(f"Pattern '{self.name}' got unknown params: {unknown_fields}")
+
+        try:
+            params = self.schema_cls(**raw_params)
+        except TypeError as exc:
+            raise ValueError(f"Invalid params for pattern '{self.name}': {exc}") from exc
+
+        if isinstance(params, GaussianLatticeParams) and (params.nx <= 0 or params.ny <= 0):
+            raise ValueError("lattice nx/ny must be positive")
+        if isinstance(params, DoubleGaussianParams) and params.sep_kxy < 0:
+            raise ValueError("double sep_kxy must be non-negative")
+        return params
+
+
+def _build_laguerre_gaussian(context: PatternContext, params: LaguerreGaussianParams) -> PatternResult:
+    lg_phase = phase.laguerre_gaussian(context.slm, l=params.l, p=params.p)
+    phi = np.mod(lg_phase + blaze(grid=context.slm, vector=(params.blaze_kx, params.blaze_ky)), 2 * np.pi)
+    corrected = _depth_correct(phi, context.deep)
+    return PatternResult(
+        phase=corrected,
+        metadata={"pattern": "laguerre-gaussian", "l": params.l, "p": params.p, "blaze": [params.blaze_kx, params.blaze_ky]},
+    )
+
+
+def _build_spot_hologram(context: PatternContext, spot_kxy: np.ndarray, metadata: dict[str, Any]) -> PatternResult:
+    shape = SpotHologram.get_padded_shape(context.slm, padding_order=1, square_padding=True)
+    hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=context.slm)
     hologram.optimize(
-        method=args.holo_method,
-        maxiter=args.holo_maxiter,
+        method=context.holo_method,
+        maxiter=context.holo_maxiter,
         feedback="computational",
         stat_groups=["computational"],
     )
     phi = np.mod(hologram.get_phase(), 2 * np.pi)
-    return _depth_correct(phi, deep)
+    return PatternResult(
+        phase=_depth_correct(phi, context.deep),
+        metadata={**metadata, "holo_method": context.holo_method, "holo_maxiter": context.holo_maxiter},
+    )
+
+
+def _build_single_gaussian(context: PatternContext, params: SingleGaussianParams) -> PatternResult:
+    spot_kxy = np.array([[params.kx], [params.ky]])
+    return _build_spot_hologram(
+        context,
+        spot_kxy=spot_kxy,
+        metadata={"pattern": "single-gaussian", "kxy": [params.kx, params.ky]},
+    )
+
+
+def _build_double_gaussian(context: PatternContext, params: DoubleGaussianParams) -> PatternResult:
+    dx = float(params.sep_kxy) / 2.0
+    spot_kxy = np.array(
+        [
+            [params.center_kx - dx, params.center_kx + dx],
+            [params.center_ky, params.center_ky],
+        ]
+    )
+    return _build_spot_hologram(
+        context,
+        spot_kxy=spot_kxy,
+        metadata={
+            "pattern": "double-gaussian",
+            "center_kxy": [params.center_kx, params.center_ky],
+            "sep_kxy": params.sep_kxy,
+        },
+    )
+
+
+def _build_gaussian_lattice(context: PatternContext, params: GaussianLatticeParams) -> PatternResult:
+    shape = SpotHologram.get_padded_shape(context.slm, padding_order=1, square_padding=True)
+    hologram = SpotHologram.make_rectangular_array(
+        shape,
+        array_shape=(params.nx, params.ny),
+        array_pitch=(params.pitch_x, params.pitch_y),
+        array_center=(params.center_kx, params.center_ky),
+        basis="kxy",
+        cameraslm=context.slm,
+    )
+    hologram.optimize(
+        method=context.holo_method,
+        maxiter=context.holo_maxiter,
+        feedback="computational",
+        stat_groups=["computational"],
+    )
+    phi = np.mod(hologram.get_phase(), 2 * np.pi)
+    return PatternResult(
+        phase=_depth_correct(phi, context.deep),
+        metadata={
+            "pattern": "gaussian-lattice",
+            "array_shape": [params.nx, params.ny],
+            "array_pitch": [params.pitch_x, params.pitch_y],
+            "array_center": [params.center_kx, params.center_ky],
+            "holo_method": context.holo_method,
+            "holo_maxiter": context.holo_maxiter,
+        },
+    )
+
+
+PATTERN_REGISTRY = {
+    "laguerre-gaussian": PatternDefinition("laguerre-gaussian", LaguerreGaussianParams, _build_laguerre_gaussian),
+    "single-gaussian": PatternDefinition("single-gaussian", SingleGaussianParams, _build_single_gaussian),
+    "double-gaussian": PatternDefinition("double-gaussian", DoubleGaussianParams, _build_double_gaussian),
+    "gaussian-lattice": PatternDefinition("gaussian-lattice", GaussianLatticeParams, _build_gaussian_lattice),
+}
+
+
+def _load_pattern_request(args):
+    request = {"pattern": None, "params": {}}
+    if args.pattern_config:
+        with open(args.pattern_config, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        request["pattern"] = data.get("pattern")
+        request["params"] = data.get("params", {})
+    if args.pattern:
+        request["pattern"] = args.pattern
+    if not request["pattern"]:
+        request["pattern"] = "laguerre-gaussian"
+    return request
+
+
+def _legacy_cli_params_for_pattern(args, pattern_name: str) -> dict[str, Any]:
+    legacy = {
+        "laguerre-gaussian": {
+            "l": args.lg_l,
+            "p": args.lg_p,
+            "blaze_kx": args.blaze_kx,
+            "blaze_ky": args.blaze_ky,
+        },
+        "single-gaussian": {"kx": args.single_kx, "ky": args.single_ky},
+        "double-gaussian": {
+            "center_kx": args.double_center_kx,
+            "center_ky": args.double_center_ky,
+            "sep_kxy": args.double_sep_kxy,
+        },
+        "gaussian-lattice": {
+            "nx": args.lattice_nx,
+            "ny": args.lattice_ny,
+            "pitch_x": args.lattice_pitch_x,
+            "pitch_y": args.lattice_pitch_y,
+            "center_kx": args.lattice_center_kx,
+            "center_ky": args.lattice_center_ky,
+        },
+    }
+    return legacy[pattern_name]
+
+
+def build_pattern(args, slm, deep) -> tuple[str, PatternResult]:
+    request = _load_pattern_request(args)
+    pattern_name = request["pattern"]
+    pattern = PATTERN_REGISTRY.get(pattern_name)
+    if pattern is None:
+        raise ValueError(f"Unknown pattern '{pattern_name}'")
+
+    raw_params = _legacy_cli_params_for_pattern(args, pattern_name)
+    raw_params.update(request["params"])
+
+    params = pattern.validate_params(raw_params)
+    context = PatternContext(slm=slm, deep=deep, holo_method=args.holo_method, holo_maxiter=args.holo_maxiter)
+    return pattern_name, pattern.build(context, params)
 
 
 def hold_until_interrupt(slm, cam=None):
@@ -118,9 +291,14 @@ def main():
     # Pattern selection + easy parameter knobs.
     parser.add_argument(
         "--pattern",
-        default="laguerre-gaussian",
+        default=None,
         choices=["single-gaussian", "double-gaussian", "gaussian-lattice", "laguerre-gaussian"],
         help="Pattern family to generate on SLM",
+    )
+    parser.add_argument(
+        "--pattern-config",
+        default="",
+        help="Optional JSON config with {'pattern': <name>, 'params': {..}}",
     )
 
     parser.add_argument("--lut-file", default="deep_1024.mat")
@@ -167,9 +345,10 @@ def main():
 
     slm = Holoeye(preselect="index:0")
     deep = load_phase_lut(Path(args.lut_file), args.lut_key)
-    pattern = build_pattern(args, slm, deep)
-    slm.set_phase(pattern, settle=True)
-    print(f"Pattern '{args.pattern}' displayed on SLM")
+    pattern_name, result = build_pattern(args, slm, deep)
+    slm.set_phase(result.phase, settle=True)
+    print(f"Pattern '{pattern_name}' displayed on SLM")
+    print(f"Pattern metadata: {result.metadata}")
 
     if not args.use_camera:
         hold_until_interrupt(slm)
