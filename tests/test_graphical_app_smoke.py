@@ -44,3 +44,17 @@ def test_run_gui_app_bootstrap_path():
     module = importlib.import_module("user_workflows.run_gui_app")
     repo_root = module._ensure_repo_root_on_path()
     assert str(repo_root) in sys.path
+
+
+def test_gui_capability_checklist_has_phase_gates():
+    checklist = Path("user_workflows/graphical_app/qa/gui_capability_checklist.md")
+    content = checklist.read_text(encoding="utf-8")
+
+    assert "gui-integration" in content
+    assert "gui-phase-1-foundation" in content
+    assert "gui-phase-2-devices" in content
+    assert "gui-phase-3-patterns-and-plots" in content
+    assert "gui-phase-4-optimization-calibration-sequences" in content
+    assert "gui-phase-5-persistence-and-release-readiness" in content
+    assert "Smoke tests pass" in content
+    assert "Manual UI checklist" in content
