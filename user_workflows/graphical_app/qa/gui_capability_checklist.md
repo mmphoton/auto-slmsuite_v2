@@ -13,6 +13,12 @@ This checklist is the signed gate record for the umbrella stream defined in:
 - Failed gate requires fix-in-place before proceeding.
 - Each milestone requires: code + tests + signed result.
 
+
+## Single-Task Execution Directive
+
+All remaining GUI readiness work is condensed into one coordinated execution task: **GUI readiness closure**.
+The task is complete only when matrix coverage, milestone gates, and smoke tests all pass together in one verification run.
+
 ## Milestone Sign-off Table
 
 | Milestone | Scope Summary | Required Artifacts (Code/Tests) | Acceptance Gate Result | Implementer Sign | Reviewer Sign | Date |

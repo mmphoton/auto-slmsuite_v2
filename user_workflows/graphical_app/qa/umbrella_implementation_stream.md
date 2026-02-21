@@ -33,6 +33,26 @@ Advancement requires all of the following:
 
 ---
 
+
+## Single Condensed Readiness Task (Perform At Once)
+
+Execute one unified "GUI readiness closure" task that delivers all milestone acceptance outputs in a single coordinated implementation wave, with one final hard gate at the end.
+
+**Task scope (must all be complete together):**
+- freeze/validate app contracts and UI->controller boundaries,
+- deliver multi-page shell + lifecycle + logging/error/progress UX,
+- complete pattern/blaze/camera/plot/optimization/ratio/calibration/output flows,
+- expand QA matrices and smoke coverage to executable parity checks,
+- sign checklist only after all automated checks pass.
+
+**Single-task acceptance gate:**
+- `milestone_gate_report(smoke_suite_passed=True)` returns all `M1..M13` true,
+- `release_freeze_ready(smoke_suite_passed=True)["release_freeze_ready"]` is true,
+- full smoke suite passes,
+- checklist and advancement log updated with evidence links/commands.
+
+---
+
 ## Mandatory Milestones and Acceptance Gates
 
 ### Milestone 1 — Core contracts freeze
