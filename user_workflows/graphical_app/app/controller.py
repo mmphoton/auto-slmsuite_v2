@@ -178,29 +178,40 @@ class AppController:
             f"Pattern '{name}' generated",
         )
 
+    def _refresh_simulated_plots(self, composed_pattern: np.ndarray) -> Dict[str, np.ndarray]:
+        simulated_phase = composed_pattern
+        simulated_intensity = np.abs(np.fft.fftshift(np.fft.fft2(np.exp(1j * composed_pattern))))
+        simulated_intensity /= max(float(simulated_intensity.max()), 1e-9)
+        payload = {
+            "simulated_phase": simulated_phase,
+            "simulated_intensity": simulated_intensity,
+        }
+        for key, value in payload.items():
+            self.plots.update(key, value)
+        return payload
+
     def simulate_before_apply(self, pattern: np.ndarray) -> OperationResult:
         def _impl() -> Dict[str, np.ndarray]:
             composed_pattern = self._compose_pattern_with_blaze(pattern)
             self.devices.slm.apply_pattern(composed_pattern)
             experimental = self.devices.camera.acquire_frame()
-            simulated_phase = composed_pattern
-            simulated_intensity = np.abs(np.fft.fftshift(np.fft.fft2(np.exp(1j * composed_pattern))))
-            simulated_intensity /= max(float(simulated_intensity.max()), 1e-9)
-            payload = {
-                "simulated_phase": simulated_phase,
-                "simulated_intensity": simulated_intensity,
-                "experimental_intensity": experimental,
-            }
-            for key, value in payload.items():
-                self.plots.update(key, value)
+            payload = self._refresh_simulated_plots(composed_pattern)
+            payload["experimental_intensity"] = experimental
+            self.plots.update("experimental_intensity", experimental)
             return payload
 
         return self._run("simulate_before_apply", _impl, "Simulation complete")
 
     def apply_pattern(self, pattern: np.ndarray) -> OperationResult:
+        def _impl() -> np.ndarray:
+            composed = self._compose_pattern_with_blaze(pattern)
+            self.devices.slm.apply_pattern(composed)
+            self._refresh_simulated_plots(composed)
+            return composed
+
         return self._run(
             "apply_pattern",
-            lambda: self.devices.slm.apply_pattern(self._compose_pattern_with_blaze(pattern)),
+            _impl,
             "Pattern applied to SLM",
         )
 
@@ -314,6 +325,18 @@ class AppController:
             self.state.cancel_task("sequence")
 
         return self._run("cancel_sequence", _impl, "Sequence cancelled")
+
+    def configure_plot(self, name: str, settings: Mapping[str, Any]) -> OperationResult:
+        return self._run("configure_plot", lambda: self.plots.configure(name, settings), f"Plot '{name}' configured")
+
+    def zoom_plot(self, name: str, factor: float) -> OperationResult:
+        return self._run("zoom_plot", lambda: self.plots.zoom(name, factor), f"Plot '{name}' zoom updated")
+
+    def pan_plot(self, name: str, dx_fraction: float, dy_fraction: float) -> OperationResult:
+        return self._run("pan_plot", lambda: self.plots.pan(name, dx_fraction, dy_fraction), f"Plot '{name}' pan updated")
+
+    def reset_plot(self, name: str) -> OperationResult:
+        return self._run("reset_plot", lambda: self.plots.reset_view(name), f"Plot '{name}' reset")
 
     def export_plot(self, name: str, output_dir: str) -> OperationResult:
         return self._run("export_plot", lambda: self.plots.export(name, Path(output_dir)), f"Plot '{name}' exported")
