@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "default": {
+      "lut_file": "deep_1024.mat",
+      "calibration_root": "user_workflows/calibrations",
+      "output_dir": "user_workflows/output"
+    }
+  }
+}
