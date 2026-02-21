@@ -14,7 +14,10 @@ Run `run_calibration.py` first to generate the calibration artifacts consumed by
 ```bash
 python user_workflows/run_calibration.py \
   --factory my_lab.bootstrap:create_fourier_slm \
-  --phase-lut /path/to/deep_1024.mat
+  --phase-lut /path/to/deep_1024.mat \
+  --run-name cal_session_a \
+  --name-template "{date}_{run_name}_{pattern}_{camera}_{iter}" \
+  --output-root user_workflows/output
 ```
 
 ### Persistent file layout
@@ -183,20 +186,33 @@ Use `run_slm_andor.py` to:
 - acquire full camera images of displayed SLM patterns,
 - optionally run camera-driven experimental feedback optimization.
 
-Example (with camera + feedback):
+## Pattern examples (4 built-in patterns + composite mode)
 
+### 1) Single Gaussian-like spot
 ```bash
 python user_workflows/run_slm_andor.py \
-  --use-camera \
-  --feedback \
-  --feedback-iters 15 \
-  --save-frames user_workflows/output/andor_frames.npy
+  --pattern single-gaussian \
+  --single-kx 0.00 \
+  --single-ky 0.01
 ```
 
-Example (no camera, hold pattern indefinitely):
-
+### 2) Double Gaussian-like spots
 ```bash
-python user_workflows/run_slm_andor.py
+python user_workflows/run_slm_andor.py \
+  --pattern double-gaussian \
+  --double-center-kx 0.00 \
+  --double-center-ky 0.00 \
+  --double-sep-kxy 0.03
+```
+
+### 3) Gaussian lattice
+```bash
+python user_workflows/run_slm_andor.py \
+  --pattern gaussian-lattice \
+  --lattice-nx 8 \
+  --lattice-ny 6 \
+  --lattice-pitch-x 0.012 \
+  --lattice-pitch-y 0.012
 ```
 
 Useful optimization knobs for spot-based patterns:
