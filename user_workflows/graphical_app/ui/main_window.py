@@ -143,10 +143,50 @@ class MainWindow(tk.Tk):
 
     def _build_camera_panel(self) -> None:
         frm = self._create_panel("Camera", "right")
-        self.camera_settings = ttk.Entry(frm)
-        self.camera_settings.insert(0, '{"exposure_ms":10,"gain":1.0,"roi":[0,0,128,128],"binning":1,"trigger":"internal","fps":30,"acquisition_mode":"single"}')
-        self.camera_settings.pack(fill=tk.X)
-        ttk.Button(frm, text="Apply Camera Settings", command=self._bind_safe("configure_camera", self._configure_camera)).pack(fill=tk.X)
+        schema_result = self.controller.camera_settings_schema()
+        schema = schema_result.payload if schema_result.success and isinstance(schema_result.payload, dict) else {}
+
+        self.camera_form_vars: dict[str, tk.Variable] = {}
+        self._camera_last_applied: dict[str, object] = dict(self.controller.state.settings_snapshots.camera)
+
+        for field in ("exposure_ms", "gain", "roi_x", "roi_y", "roi_width", "roi_height", "fps"):
+            unit = schema.get(field, {}).get("unit", "")
+            ttk.Label(frm, text=f"{field} ({unit})" if unit else field).pack(anchor="w")
+            var = tk.StringVar(value=str(self._camera_last_applied.get(field, schema.get(field, {}).get("minimum", ""))))
+            self.camera_form_vars[field] = var
+            ttk.Entry(frm, textvariable=var).pack(fill=tk.X)
+
+        ttk.Label(frm, text="binning (px)").pack(anchor="w")
+        binning_var = tk.StringVar(value=str(self._camera_last_applied.get("binning", 1)))
+        self.camera_form_vars["binning"] = binning_var
+        ttk.Combobox(frm, textvariable=binning_var, values=[1, 2, 4, 8], state="readonly").pack(fill=tk.X)
+
+        ttk.Label(frm, text="trigger_mode").pack(anchor="w")
+        trigger_var = tk.StringVar(value=str(self._camera_last_applied.get("trigger_mode", "internal")))
+        self.camera_form_vars["trigger_mode"] = trigger_var
+        ttk.Combobox(frm, textvariable=trigger_var, values=["internal", "external", "software"], state="readonly").pack(fill=tk.X)
+
+        ttk.Label(frm, text="shutter_mode").pack(anchor="w")
+        shutter_var = tk.StringVar(value=str(self._camera_last_applied.get("shutter_mode", "rolling")))
+        self.camera_form_vars["shutter_mode"] = shutter_var
+        ttk.Combobox(frm, textvariable=shutter_var, values=["rolling", "global"], state="readonly").pack(fill=tk.X)
+
+        ttk.Label(frm, text="acquisition_mode").pack(anchor="w")
+        acquisition_var = tk.StringVar(value=str(self._camera_last_applied.get("acquisition_mode", "single")))
+        self.camera_form_vars["acquisition_mode"] = acquisition_var
+        ttk.Combobox(frm, textvariable=acquisition_var, values=["single", "continuous", "kinetic"], state="readonly").pack(fill=tk.X)
+
+        button_row = ttk.Frame(frm)
+        button_row.pack(fill=tk.X, pady=2)
+        ttk.Button(button_row, text="Apply", command=self._bind_safe("configure_camera", self._configure_camera)).pack(side=tk.LEFT, expand=True, fill=tk.X)
+        ttk.Button(button_row, text="Read Current", command=self._bind_safe("read_camera", self._read_camera_settings)).pack(side=tk.LEFT, expand=True, fill=tk.X)
+        ttk.Button(button_row, text="Revert", command=self._bind_safe("revert_camera", self._revert_camera_settings)).pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        self._set_camera_form(self._camera_last_applied)
+
+        self.camera_feedback_var = tk.StringVar(value="Camera settings idle")
+        ttk.Label(frm, textvariable=self.camera_feedback_var).pack(anchor="w", pady=(2, 4))
+
         self.temp_label = ttk.Label(frm, text="Temperature: n/a")
         self.temp_label.pack(anchor="w")
         ttk.Button(frm, text="Refresh Telemetry", command=self._bind_safe("telemetry", self._telemetry)).pack(fill=tk.X)
@@ -349,8 +389,49 @@ class MainWindow(tk.Tk):
         self.pattern_form.reset_to_defaults()
         self.status_var.set(f"Reset parameters for {self.pattern_name.get()}")
 
+    def _collect_camera_settings(self) -> dict[str, object]:
+        return {
+            "exposure_ms": float(str(self.camera_form_vars["exposure_ms"].get()).strip()),
+            "gain": float(str(self.camera_form_vars["gain"].get()).strip()),
+            "roi_x": int(str(self.camera_form_vars["roi_x"].get()).strip()),
+            "roi_y": int(str(self.camera_form_vars["roi_y"].get()).strip()),
+            "roi_width": int(str(self.camera_form_vars["roi_width"].get()).strip()),
+            "roi_height": int(str(self.camera_form_vars["roi_height"].get()).strip()),
+            "binning": int(str(self.camera_form_vars["binning"].get()).strip()),
+            "trigger_mode": str(self.camera_form_vars["trigger_mode"].get()),
+            "shutter_mode": str(self.camera_form_vars["shutter_mode"].get()),
+            "fps": float(str(self.camera_form_vars["fps"].get()).strip()),
+            "acquisition_mode": str(self.camera_form_vars["acquisition_mode"].get()),
+        }
+
+    def _set_camera_form(self, payload: dict[str, object]) -> None:
+        mapped = dict(payload)
+        roi = mapped.get("roi")
+        if isinstance(roi, list) and len(roi) == 4:
+            mapped["roi_x"], mapped["roi_y"], mapped["roi_width"], mapped["roi_height"] = roi
+        for key, var in self.camera_form_vars.items():
+            if key in mapped:
+                var.set(str(mapped[key]))
+
     def _configure_camera(self) -> None:
-        self._handle_result(self.controller.configure_camera(json.loads(self.camera_settings.get())))
+        result = self.controller.configure_camera(self._collect_camera_settings())
+        self._handle_result(result)
+        if result.success and isinstance(result.payload, dict):
+            self._camera_last_applied = dict(result.payload)
+            self.camera_feedback_var.set("Camera settings applied successfully")
+        elif not result.success:
+            self.camera_feedback_var.set(f"Failed to apply camera settings: {result.message}")
+
+    def _read_camera_settings(self) -> None:
+        result = self.controller.read_camera_settings()
+        self._handle_result(result)
+        if result.success and isinstance(result.payload, dict):
+            self._set_camera_form(result.payload)
+            self.camera_feedback_var.set("Loaded current camera settings")
+
+    def _revert_camera_settings(self) -> None:
+        self._set_camera_form(self._camera_last_applied)
+        self.camera_feedback_var.set("Reverted to last applied camera settings")
 
     def _telemetry(self) -> None:
         telem_result = self.controller.camera_telemetry()
@@ -360,6 +441,12 @@ class MainWindow(tk.Tk):
             temp_status = telem_result.payload.get("temperature_status", "unknown")
             warn = " ⚠" if temp_status in {"warning", "critical"} else ""
             self.temp_label.configure(text=f"Temperature: {temp:.2f} C ({temp_status}){warn}")
+            if temp_status == "critical":
+                self.temp_label.configure(foreground="red")
+            elif temp_status == "warning":
+                self.temp_label.configure(foreground="orange")
+            else:
+                self.temp_label.configure(foreground="black")
 
     def _run_optimization(self) -> None:
         self._handle_result(self.controller.run_optimization(json.loads(self.optimization_settings.get())))

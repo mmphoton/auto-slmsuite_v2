@@ -22,6 +22,7 @@ from user_workflows.graphical_app.app.state import (
     RunMetadata,
 )
 from user_workflows.graphical_app.calibration.tools import CalibrationProfile, CalibrationTools
+from user_workflows.graphical_app.devices.camera_settings import camera_settings_schema, parse_camera_settings
 from user_workflows.graphical_app.devices.manager import DeviceManager
 from user_workflows.graphical_app.optimization.runner import OptimizationRunner
 from user_workflows.graphical_app.app.patterns import PatternService
@@ -126,6 +127,7 @@ class AppController:
                 parameters=dict(params),
                 calibration_profile=self.state.settings_snapshots.calibration.get("profile_name"),
                 optimizer=dict(self.state.settings_snapshots.optimizer),
+                camera_settings=dict(self.state.settings_snapshots.camera),
                 blaze={
                     "enabled": self.state.blaze.enabled,
                     "kx": self.state.blaze.kx,
@@ -212,16 +214,34 @@ class AppController:
     def clear_pattern_queue(self) -> OperationResult:
         return self._run("clear_pattern_queue", self.devices.slm.clear_queue, "SLM queue cleared")
 
+    def camera_settings_schema(self) -> OperationResult:
+        return self._run("camera_settings_schema", camera_settings_schema, "Camera settings schema loaded")
+
     def configure_camera(self, settings: Mapping[str, Any]) -> OperationResult:
-        return self._run("configure_camera", lambda: self.devices.camera.configure(settings), "Camera configured")
+        def _impl() -> Dict[str, Any]:
+            parsed = parse_camera_settings(settings)
+            payload = parsed.to_payload()
+            self.devices.camera.configure(payload)
+            self.state.settings_snapshots.camera = dict(payload)
+            return payload
+
+        return self._run("configure_camera", _impl, "Camera configured")
+
+    def read_camera_settings(self) -> OperationResult:
+        return self._run(
+            "read_camera_settings",
+            lambda: dict(self.state.settings_snapshots.camera),
+            "Read current camera settings",
+        )
 
     def camera_telemetry(self) -> OperationResult:
         def _impl() -> Dict[str, Any]:
             telemetry = self.devices.camera.telemetry()
             self.state.update_camera_telemetry(telemetry)
             temp_state = self.state.camera_telemetry.get("temperature_status", "unknown")
+            temp_c = self.state.camera_telemetry.get("temperature_c", "n/a")
+            self.state.add_log(LogLevel.INFO, f"Camera temperature update: {temp_c}C ({temp_state})", source="camera")
             if temp_state in {"warning", "critical"}:
-                temp_c = self.state.camera_telemetry.get("temperature_c", "n/a")
                 msg = f"Camera temperature {temp_c}C reached {temp_state} threshold"
                 self.state.notify(msg)
                 self.state.add_log(LogLevel.WARNING, msg, source="camera")
