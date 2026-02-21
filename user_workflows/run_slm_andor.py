@@ -15,11 +15,15 @@ if __package__ in (None, ""):
 from slmsuite.hardware.cameras.andor_idus import AndorIDus
 from slmsuite.hardware.cameraslms import FourierSLM
 from slmsuite.hardware.slms.holoeye import Holoeye
-from slmsuite.holography.algorithms import FeedbackHologram
+from slmsuite.holography.algorithms import FeedbackHologram, SpotHologram
+from slmsuite.holography.toolbox import phase
 
 from user_workflows.calibration_io import assert_required_calibration_files
-from user_workflows.patterns import get_pattern
-from user_workflows.patterns.depth_correction import apply_depth_correction
+from user_workflows.patterns.utils import (
+    add_blaze_and_wrap,
+    apply_depth_correction,
+    build_spot_solve_settings,
+)
 
 
 def load_phase_lut(path: Path, key: str = "deep") -> np.ndarray:
@@ -34,9 +38,44 @@ def load_phase_lut(path: Path, key: str = "deep") -> np.ndarray:
 
 def build_pattern(args, slm, deep):
     """Build one of several user-selectable analytical pattern families."""
-    pattern_builder = get_pattern(args.pattern)
-    result = pattern_builder.build(args, slm)
-    return apply_depth_correction(result.phase, deep), result.metadata
+    ny, nx = slm.shape
+
+    if args.pattern == "laguerre-gaussian":
+        lg_phase = phase.laguerre_gaussian(slm, l=args.lg_l, p=args.lg_p)
+        phi = add_blaze_and_wrap(base_phase=lg_phase, grid=slm, blaze_vector=(args.blaze_kx, args.blaze_ky))
+        return apply_depth_correction(phi, deep)
+
+    # Spot-based patterns use hologram optimization so users get Gaussian-like focused spots.
+    shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+
+    if args.pattern == "single-gaussian":
+        spot_kxy = np.array([[args.single_kx], [args.single_ky]])
+        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
+    elif args.pattern == "double-gaussian":
+        dx = float(args.double_sep_kxy) / 2.0
+        spot_kxy = np.array(
+            [
+                [args.double_center_kx - dx, args.double_center_kx + dx],
+                [args.double_center_ky, args.double_center_ky],
+            ]
+        )
+        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
+    elif args.pattern == "gaussian-lattice":
+        hologram = SpotHologram.make_rectangular_array(
+            shape,
+            array_shape=(args.lattice_nx, args.lattice_ny),
+            array_pitch=(args.lattice_pitch_x, args.lattice_pitch_y),
+            array_center=(args.lattice_center_kx, args.lattice_center_ky),
+            basis="kxy",
+            cameraslm=slm,
+        )
+    else:
+        raise ValueError(f"Unknown pattern '{args.pattern}'")
+
+    solve_settings = build_spot_solve_settings(method=args.holo_method, maxiter=args.holo_maxiter)
+    hologram.optimize(**solve_settings)
+    phi = np.mod(hologram.get_phase(), 2 * np.pi)
+    return apply_depth_correction(phi, deep)
 
 
 def hold_until_interrupt(slm, cam=None):

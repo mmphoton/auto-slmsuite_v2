@@ -1,13 +1,15 @@
-"""Pattern package for SLM analytical generators."""
+"""Pattern utilities and builders for user workflows."""
 
-from user_workflows.patterns.base import BasePattern, PatternResult, get_pattern
-
-# Import modules for side-effect registration.
-from user_workflows.patterns import (  # noqa: F401
-    double_gaussian,
-    gaussian_lattice,
-    laguerre_gaussian,
-    single_gaussian,
+from .utils import (
+    add_blaze_and_wrap,
+    apply_depth_correction,
+    build_spot_solve_settings,
+    simulate_expected_farfield,
 )
 
-__all__ = ["BasePattern", "PatternResult", "get_pattern"]
+__all__ = [
+    "add_blaze_and_wrap",
+    "apply_depth_correction",
+    "build_spot_solve_settings",
+    "simulate_expected_farfield",
+]
