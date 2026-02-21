@@ -40,25 +40,26 @@ class MainWindow(tk.Tk):
         self.mode = tk.StringVar(value="simulation")
         ttk.Radiobutton(frm, text="Simulation", variable=self.mode, value="simulation", command=self._set_mode).pack(anchor="w")
         ttk.Radiobutton(frm, text="Hardware", variable=self.mode, value="hardware", command=self._set_mode).pack(anchor="w")
-        ttk.Button(frm, text="Discover", command=lambda: self.controller.devices.discover()).pack(fill=tk.X)
-        ttk.Button(frm, text="Connect", command=self.controller.devices.connect).pack(fill=tk.X)
-        ttk.Button(frm, text="Reconnect", command=self.controller.devices.reconnect).pack(fill=tk.X)
-        ttk.Button(frm, text="Release SLM", command=self.controller.devices.release_slm).pack(fill=tk.X)
-        ttk.Button(frm, text="Release Camera", command=self.controller.devices.release_camera).pack(fill=tk.X)
-        ttk.Button(frm, text="Release Both", command=self.controller.devices.release_both).pack(fill=tk.X)
+        ttk.Button(frm, text="Discover", command=self.controller.discover_devices).pack(fill=tk.X)
+        ttk.Button(frm, text="Connect", command=self.controller.connect_devices).pack(fill=tk.X)
+        ttk.Button(frm, text="Reconnect", command=self.controller.reconnect_devices).pack(fill=tk.X)
+        ttk.Button(frm, text="Release SLM", command=self.controller.release_slm).pack(fill=tk.X)
+        ttk.Button(frm, text="Release Camera", command=self.controller.release_camera).pack(fill=tk.X)
+        ttk.Button(frm, text="Release Both", command=self.controller.release_both).pack(fill=tk.X)
 
     def _build_slm_panel(self) -> None:
         frm = ttk.LabelFrame(self.center, text="SLM Controls")
         frm.pack(fill=tk.X, padx=6, pady=6)
+        pattern_options = self.controller.available_patterns().payload or []
         self.pattern_name = tk.StringVar(value="single-gaussian")
-        ttk.Combobox(frm, textvariable=self.pattern_name, values=self.controller.patterns.available_patterns()).pack(fill=tk.X)
+        ttk.Combobox(frm, textvariable=self.pattern_name, values=pattern_options).pack(fill=tk.X)
         self.param_entry = ttk.Entry(frm)
         self.param_entry.insert(0, '{"kx":0.0,"ky":0.01}')
         self.param_entry.pack(fill=tk.X)
         ttk.Button(frm, text="Simulate Before Apply", command=self._simulate).pack(fill=tk.X)
         ttk.Button(frm, text="Apply", command=self._apply).pack(fill=tk.X)
         ttk.Button(frm, text="Queue", command=self._queue).pack(fill=tk.X)
-        ttk.Button(frm, text="Clear Queue", command=self.controller.devices.slm.clear_queue).pack(fill=tk.X)
+        ttk.Button(frm, text="Clear Queue", command=self.controller.clear_pattern_queue).pack(fill=tk.X)
 
     def _build_camera_panel(self) -> None:
         frm = ttk.LabelFrame(self.right, text="Camera Controls")
@@ -92,25 +93,31 @@ class MainWindow(tk.Tk):
 
     def _simulate(self) -> None:
         params = json.loads(self.param_entry.get())
-        pattern = self.controller.generate_pattern(self.pattern_name.get(), params)
-        self.controller.simulate_before_apply(pattern)
+        pattern_result = self.controller.generate_pattern(self.pattern_name.get(), params)
+        if pattern_result.success and pattern_result.payload is not None:
+            self.controller.simulate_before_apply(pattern_result.payload)
 
     def _apply(self) -> None:
         params = json.loads(self.param_entry.get())
-        self.controller.devices.slm.apply_pattern(self.controller.generate_pattern(self.pattern_name.get(), params))
+        pattern_result = self.controller.generate_pattern(self.pattern_name.get(), params)
+        if pattern_result.success and pattern_result.payload is not None:
+            self.controller.apply_pattern(pattern_result.payload)
 
     def _queue(self) -> None:
         params = json.loads(self.param_entry.get())
-        self.controller.devices.slm.queue_pattern(self.controller.generate_pattern(self.pattern_name.get(), params))
+        pattern_result = self.controller.generate_pattern(self.pattern_name.get(), params)
+        if pattern_result.success and pattern_result.payload is not None:
+            self.controller.queue_pattern(pattern_result.payload)
 
     def _configure_camera(self) -> None:
-        self.controller.devices.camera.configure(json.loads(self.camera_settings.get()))
+        self.controller.configure_camera(json.loads(self.camera_settings.get()))
 
     def _telemetry(self) -> None:
-        telem = self.controller.devices.camera.telemetry()
-        temp = telem["temperature_c"]
-        warn = " ⚠" if temp > -55 else ""
-        self.temp_label.configure(text=f"Temperature: {temp:.2f} C{warn}")
+        telem_result = self.controller.camera_telemetry()
+        if telem_result.success and isinstance(telem_result.payload, dict):
+            temp = telem_result.payload["temperature_c"]
+            warn = " ⚠" if temp > -55 else ""
+            self.temp_label.configure(text=f"Temperature: {temp:.2f} C{warn}")
 
     def _pop_plot(self) -> None:
         w = tk.Toplevel(self)

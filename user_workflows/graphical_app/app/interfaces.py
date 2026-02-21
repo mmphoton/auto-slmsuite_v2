@@ -10,6 +10,30 @@ from typing import Any, Dict, Iterable, List, Mapping, Protocol, Sequence
 import numpy as np
 
 
+
+
+@dataclass
+class OperationError:
+    code: str
+    details: Dict[str, Any] | None = None
+
+
+@dataclass
+class OperationResult:
+    success: bool
+    message: str
+    payload: Any | None = None
+    error: OperationError | None = None
+
+
+def success_result(message: str, payload: Any | None = None) -> OperationResult:
+    return OperationResult(success=True, message=message, payload=payload)
+
+
+def failure_result(message: str, code: str = "operation_error", details: Dict[str, Any] | None = None) -> OperationResult:
+    return OperationResult(success=False, message=message, error=OperationError(code=code, details=details))
+
+
 @dataclass
 class PlotExport:
     image_path: Path

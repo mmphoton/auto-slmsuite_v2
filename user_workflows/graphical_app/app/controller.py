@@ -3,16 +3,28 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Mapping
+from typing import Any, Callable, Dict, Mapping
 
 import numpy as np
 
-from user_workflows.graphical_app.app.interfaces import feature_matrix_rows
-from user_workflows.graphical_app.app.state import AppState, Mode, RunMetadata
-from user_workflows.graphical_app.app.patterns import PatternService
+from user_workflows.graphical_app.app.interfaces import (
+    OperationResult,
+    failure_result,
+    feature_matrix_rows,
+    success_result,
+)
+from user_workflows.graphical_app.app.state import (
+    AppState,
+    DeviceConnectionState,
+    DeviceError,
+    LogLevel,
+    Mode,
+    RunMetadata,
+)
 from user_workflows.graphical_app.calibration.tools import CalibrationTools
 from user_workflows.graphical_app.devices.manager import DeviceManager
 from user_workflows.graphical_app.optimization.runner import OptimizationRunner
+from user_workflows.graphical_app.app.patterns import PatternService
 from user_workflows.graphical_app.persistence.store import PersistenceStore
 from user_workflows.graphical_app.plotting.backend import PlotBackend
 from user_workflows.graphical_app.plugins.registry import PluginRegistry
@@ -32,52 +44,148 @@ class AppController:
         self.plugins = PluginRegistry()
         self.plugins.load_builtin_patterns()
 
-    def start_run(self, run_id: str, params: Mapping[str, Any]) -> None:
-        self.state.active_run = RunMetadata(
-            run_id=run_id,
-            mode=self.state.mode,
-            device_snapshot=dict(self.state.device_status),
-            parameters=dict(params),
+    def _handle_exception(self, action: str, exc: Exception) -> OperationResult:
+        message = f"{action} failed: {exc}"
+        self.state.notify(message)
+        self.state.add_log(LogLevel.ERROR, message, source="controller")
+        for device_name in ("slm", "camera"):
+            self.state.set_device_state(
+                device_name,
+                DeviceConnectionState.ERROR,
+                error=DeviceError(message=str(exc), code=type(exc).__name__, details={"action": action}),
+            )
+        return failure_result(message, code=type(exc).__name__, details={"action": action})
+
+    def _run(self, action: str, fn: Callable[[], Any], ok_message: str, payload: Any | None = None) -> OperationResult:
+        try:
+            result = fn()
+            self.state.add_log(LogLevel.INFO, ok_message, source="controller")
+            return success_result(ok_message, payload=result if payload is None else payload)
+        except Exception as exc:  # central exception hook for backend errors
+            return self._handle_exception(action, exc)
+
+    def start_run(self, run_id: str, params: Mapping[str, Any]) -> OperationResult:
+        def _impl() -> None:
+            self.state.active_run = RunMetadata(
+                run_id=run_id,
+                mode=self.state.mode,
+                device_snapshot=dict(self.state.device_status),
+                parameters=dict(params),
+                calibration_profile=self.state.settings_snapshots.calibration.get("profile_name"),
+                optimizer=dict(self.state.settings_snapshots.optimizer),
+            )
+            self.state.workflow.active_workflow = "run_active"
+
+        return self._run("start_run", _impl, f"Run '{run_id}' started")
+
+    def stop_run(self) -> OperationResult:
+        def _impl() -> None:
+            self.state.active_run = None
+            self.state.workflow.active_workflow = "idle"
+
+        return self._run("stop_run", _impl, "Run stopped")
+
+    def set_mode(self, mode: str) -> OperationResult:
+        return self._run("set_mode", lambda: self.devices.set_mode(Mode(mode)), f"Mode set to {mode}")
+
+    def discover_devices(self) -> OperationResult:
+        return self._run("discover_devices", self.devices.discover, "Device discovery complete")
+
+    def connect_devices(self) -> OperationResult:
+        return self._run("connect_devices", self.devices.connect, "Devices connected")
+
+    def reconnect_devices(self) -> OperationResult:
+        return self._run("reconnect_devices", self.devices.reconnect, "Devices reconnected")
+
+    def release_slm(self) -> OperationResult:
+        return self._run("release_slm", self.devices.release_slm, "SLM released")
+
+    def release_camera(self) -> OperationResult:
+        return self._run("release_camera", self.devices.release_camera, "Camera released")
+
+    def release_both(self) -> OperationResult:
+        return self._run("release_both", self.devices.release_both, "SLM and camera released")
+
+    def available_patterns(self) -> OperationResult:
+        return self._run("available_patterns", self.patterns.available_patterns, "Loaded pattern catalog")
+
+    def generate_pattern(self, name: str, params: Mapping[str, Any]) -> OperationResult:
+        return self._run(
+            "generate_pattern",
+            lambda: self.patterns.generate(name, params, shape=(128, 128)),
+            f"Pattern '{name}' generated",
         )
 
-    def stop_run(self) -> None:
-        self.state.active_run = None
+    def simulate_before_apply(self, pattern: np.ndarray) -> OperationResult:
+        def _impl() -> Dict[str, np.ndarray]:
+            self.devices.slm.apply_pattern(pattern)
+            experimental = self.devices.camera.acquire_frame()
+            simulated_phase = pattern
+            simulated_intensity = np.abs(np.fft.fftshift(np.fft.fft2(np.exp(1j * pattern))))
+            simulated_intensity /= max(float(simulated_intensity.max()), 1e-9)
+            payload = {
+                "simulated_phase": simulated_phase,
+                "simulated_intensity": simulated_intensity,
+                "experimental_intensity": experimental,
+            }
+            for key, value in payload.items():
+                self.plots.update(key, value)
+            return payload
 
-    def set_mode(self, mode: str) -> None:
-        self.devices.set_mode(Mode(mode))
+        return self._run("simulate_before_apply", _impl, "Simulation complete")
 
-    def generate_pattern(self, name: str, params: Mapping[str, Any]) -> np.ndarray:
-        return self.patterns.generate(name, params, shape=(128, 128))
+    def apply_pattern(self, pattern: np.ndarray) -> OperationResult:
+        return self._run("apply_pattern", lambda: self.devices.slm.apply_pattern(pattern), "Pattern applied to SLM")
 
-    def simulate_before_apply(self, pattern: np.ndarray) -> Dict[str, np.ndarray]:
-        self.devices.slm.apply_pattern(pattern)
-        experimental = self.devices.camera.acquire_frame()
-        simulated_phase = pattern
-        simulated_intensity = np.abs(np.fft.fftshift(np.fft.fft2(np.exp(1j * pattern))))
-        simulated_intensity /= max(float(simulated_intensity.max()), 1e-9)
-        payload = {
-            "simulated_phase": simulated_phase,
-            "simulated_intensity": simulated_intensity,
-            "experimental_intensity": experimental,
-        }
-        for key, value in payload.items():
-            self.plots.update(key, value)
-        return payload
+    def queue_pattern(self, pattern: np.ndarray) -> OperationResult:
+        return self._run("queue_pattern", lambda: self.devices.slm.queue_pattern(pattern), "Pattern queued")
 
-    def run_optimization(self, config: Mapping[str, Any]) -> None:
-        self.optimizer.start(config)
-        hist = self.optimizer.history()
-        arr = np.array([[x["iteration"], x["objective"]] for x in hist], dtype=float)
-        self.plots.update("optimization_convergence", arr)
+    def clear_pattern_queue(self) -> OperationResult:
+        return self._run("clear_pattern_queue", self.devices.slm.clear_queue, "SLM queue cleared")
 
-    def export_plot(self, name: str, output_dir: str) -> None:
-        self.plots.export(name, Path(output_dir))
+    def configure_camera(self, settings: Mapping[str, Any]) -> OperationResult:
+        return self._run("configure_camera", lambda: self.devices.camera.configure(settings), "Camera configured")
 
-    def save_session_snapshot(self, path: str) -> None:
-        self.persistence.snapshot_session(self.state, Path(path))
+    def camera_telemetry(self) -> OperationResult:
+        return self._run("camera_telemetry", self.devices.camera.telemetry, "Camera telemetry refreshed")
 
-    def output_name_preview(self, artifact: str, run_id: str) -> str:
-        return self.persistence.render_name(self.state.naming_template, session=self.state.session_name, run_id=run_id, artifact=artifact)
+    def run_optimization(self, config: Mapping[str, Any]) -> OperationResult:
+        def _impl() -> None:
+            self.state.progress = self.state.progress.__class__(
+                task_name="optimization",
+                current=0,
+                total=int(config.get("iterations", 20)),
+                is_active=True,
+                message="Optimization running",
+            )
+            self.state.settings_snapshots.optimizer = dict(config)
+            self.optimizer.start(config)
+            hist = self.optimizer.history()
+            arr = np.array([[x["iteration"], x["objective"]] for x in hist], dtype=float)
+            self.plots.update("optimization_convergence", arr)
+            self.state.progress.current = len(hist)
+            self.state.progress.is_active = False
+            self.state.progress.message = "Optimization complete"
+
+        return self._run("run_optimization", _impl, "Optimization complete")
+
+    def export_plot(self, name: str, output_dir: str) -> OperationResult:
+        return self._run("export_plot", lambda: self.plots.export(name, Path(output_dir)), f"Plot '{name}' exported")
+
+    def save_session_snapshot(self, path: str) -> OperationResult:
+        return self._run("save_session_snapshot", lambda: self.persistence.snapshot_session(self.state, Path(path)), "Session snapshot saved")
+
+    def output_name_preview(self, artifact: str, run_id: str) -> OperationResult:
+        return self._run(
+            "output_name_preview",
+            lambda: self.persistence.render_name(
+                self.state.naming_template,
+                session=self.state.session_name,
+                run_id=run_id,
+                artifact=artifact,
+            ),
+            "Output name preview generated",
+        )
 
     def functionality_matrix(self) -> Dict[str, bool]:
         ui_bindings = {
