@@ -14,7 +14,10 @@ Run `run_calibration.py` first to generate the calibration artifacts consumed by
 ```bash
 python user_workflows/run_calibration.py \
   --factory my_lab.bootstrap:create_fourier_slm \
-  --phase-lut /path/to/deep_1024.mat
+  --phase-lut /path/to/deep_1024.mat \
+  --run-name cal_session_a \
+  --name-template "{date}_{run_name}_{pattern}_{camera}_{iter}" \
+  --output-root user_workflows/output
 ```
 
 ### Persistent file layout
@@ -183,20 +186,31 @@ Use `run_slm_andor.py` to:
 - acquire full camera images of displayed SLM patterns,
 - optionally run camera-driven experimental feedback optimization.
 
-Example (with camera + feedback):
+Example (camera + feedback + custom naming):
 
 ```bash
 python user_workflows/run_slm_andor.py \
   --use-camera \
   --feedback \
   --feedback-iters 15 \
-  --save-frames user_workflows/output/andor_frames.npy
+  --run-name lg_feedback \
+  --output-root user_workflows/output \
+  --name-template "{date}_{run_name}_{pattern}_{camera}_{iter}"
 ```
 
-Example (no camera, hold pattern indefinitely):
+Resulting run tree (example):
 
-```bash
-python user_workflows/run_slm_andor.py
+```text
+user_workflows/output/
+└── 20260221_lg_feedback_laguerre-gaussian_andor_000/
+    ├── manifest.json
+    ├── metrics.json
+    ├── phase.npy
+    ├── frames/
+    │   ├── frame_000.npy
+    │   └── frame_001.npy
+    └── plots/
+        └── first_frame.png
 ```
 
 Useful optimization knobs for spot-based patterns:
