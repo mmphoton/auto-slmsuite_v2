@@ -9,6 +9,8 @@ from pathlib import Path
 import numpy as np
 import scipy.io
 
+from user_workflows.simulation.sim_factory import build_simulated_fourier_slm
+
 
 def _load_fourier_slm(factory_path: str):
     """Load a `module:function` factory that returns an initialized FourierSLM instance."""
@@ -49,17 +51,33 @@ def _load_phase_lut(path: Path, key: str):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--factory", required=True, help="module:function that returns FourierSLM")
+    parser.add_argument("--factory", default="", help="module:function that returns FourierSLM")
     parser.add_argument("--phase-lut", required=True, help="Path to phase-depth LUT (.mat/.npy)")
     parser.add_argument("--phase-lut-key", default="deep", help="Variable name in .mat LUT file")
     parser.add_argument("--calibration-root", default="user_workflows/calibrations", help="Output directory")
     parser.add_argument("--force-fourier", action="store_true", help="Force a fresh Fourier calibration")
+    parser.add_argument("--simulate", action="store_true", help="Use simulated SLM/camera stack")
+    parser.add_argument("--seed", type=int, default=0, help="Deterministic seed for simulated runs")
+    parser.add_argument(
+        "--simulation-scenario",
+        default="two-spot-imbalance",
+        choices=["two-spot-imbalance", "n-spot-lattice-nonuniform", "high-noise-failure"],
+        help="Synthetic simulation case",
+    )
     args = parser.parse_args()
+
+    if not args.simulate and not args.factory:
+        raise ValueError("Provide --factory for hardware runs, or use --simulate.")
+
+    np.random.seed(args.seed)
 
     calibration_root = Path(args.calibration_root)
     calibration_root.mkdir(parents=True, exist_ok=True)
 
-    fs = _load_fourier_slm(args.factory)
+    if args.simulate:
+        fs = build_simulated_fourier_slm(seed=args.seed, scenario=args.simulation_scenario)
+    else:
+        fs = _load_fourier_slm(args.factory)
 
     # (a) Phase-depth LUT loading/validation.
     phase_lut = _load_phase_lut(Path(args.phase_lut), args.phase_lut_key)
@@ -98,6 +116,13 @@ def main():
             "Wavefront processing did not produce `slm.source['amplitude']`; cannot initialize WGS source amplitude."
         )
     np.save(calibration_root / "source-amplitude-corrected.npy", source_amplitude)
+
+    metadata = {
+        "simulate": bool(args.simulate),
+        "seed": int(args.seed),
+        "simulation_scenario": args.simulation_scenario if args.simulate else "",
+    }
+    np.save(calibration_root / "run-metadata.npy", metadata, allow_pickle=True)
 
     print("Calibration workflow completed.")
     print(f"Artifacts written under: {calibration_root.resolve()}")
