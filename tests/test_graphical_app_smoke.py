@@ -130,3 +130,27 @@ def test_camera_temperature_logging_occurs_on_refresh():
     camera_logs = [entry for entry in c.state.logs if entry.source == "camera"]
     assert camera_logs
     assert "Camera temperature update" in camera_logs[-1].message
+
+
+def test_optimization_controls_and_export(tmp_path):
+    c = AppController()
+    c.start_run("run-opt", {"purpose": "optimization"})
+    result = c.start_optimization({"wgs": {"max_iterations": 6, "gain": 0.15}})
+    assert result.success
+
+    progress = c.optimization_progress()
+    assert progress.success
+    assert progress.payload["iteration"] == 6
+
+    assert c.pause_optimization().success
+    assert c.resume_optimization().success
+    assert c.stop_optimization().success
+
+    out = tmp_path / "optimization_history.csv"
+    export = c.export_optimization_history(str(out))
+    assert export.success
+    assert out.exists()
+    sidecar = out.with_suffix(".json")
+    assert sidecar.exists()
+    payload = c.persistence.load_json(sidecar)
+    assert payload["run_metadata"]["run_id"] == "run-opt"
