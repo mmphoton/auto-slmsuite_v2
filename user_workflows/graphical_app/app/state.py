@@ -61,6 +61,7 @@ class ProgressState:
     total: int = 0
     is_active: bool = False
     message: str = ""
+    is_cancelled: bool = False
 
 
 @dataclass
@@ -106,6 +107,13 @@ class AppState:
     notifications: List[str] = field(default_factory=list)
     logs: List[LogEntry] = field(default_factory=list)
     progress: ProgressState = field(default_factory=ProgressState)
+    task_progress: Dict[str, ProgressState] = field(
+        default_factory=lambda: {
+            "optimization": ProgressState(task_name="optimization"),
+            "calibration": ProgressState(task_name="calibration"),
+            "sequence": ProgressState(task_name="sequence"),
+        }
+    )
     camera_telemetry: Dict[str, Any] = field(default_factory=dict)
     camera_temperature_thresholds: Dict[str, float] = field(
         default_factory=lambda: {
@@ -163,6 +171,37 @@ class AppState:
                 source=source,
             )
         )
+
+    def add_command_log(self, command: str, phase: str, message: str, level: LogLevel = LogLevel.INFO) -> None:
+        self.add_log(level, f"[{command}] {phase}: {message}", source="controller")
+
+    def start_task(self, task_name: str, total: int, message: str) -> None:
+        progress = self.task_progress.setdefault(task_name, ProgressState(task_name=task_name))
+        progress.current = 0
+        progress.total = max(0, total)
+        progress.is_active = True
+        progress.is_cancelled = False
+        progress.message = message
+        self.progress = progress
+
+    def update_task(self, task_name: str, current: int, message: str) -> None:
+        progress = self.task_progress.setdefault(task_name, ProgressState(task_name=task_name))
+        progress.current = max(0, current)
+        progress.message = message
+        self.progress = progress
+
+    def complete_task(self, task_name: str, message: str) -> None:
+        progress = self.task_progress.setdefault(task_name, ProgressState(task_name=task_name))
+        progress.is_active = False
+        progress.message = message
+        self.progress = progress
+
+    def cancel_task(self, task_name: str) -> None:
+        progress = self.task_progress.setdefault(task_name, ProgressState(task_name=task_name))
+        progress.is_cancelled = True
+        progress.is_active = False
+        progress.message = f"{task_name.title()} cancelled"
+        self.progress = progress
 
     def update_camera_telemetry(self, telemetry: Optional[Dict[str, Any]]) -> None:
         payload = dict(telemetry or {})

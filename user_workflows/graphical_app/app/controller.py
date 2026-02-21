@@ -21,7 +21,7 @@ from user_workflows.graphical_app.app.state import (
     Mode,
     RunMetadata,
 )
-from user_workflows.graphical_app.calibration.tools import CalibrationTools
+from user_workflows.graphical_app.calibration.tools import CalibrationProfile, CalibrationTools
 from user_workflows.graphical_app.devices.manager import DeviceManager
 from user_workflows.graphical_app.optimization.runner import OptimizationRunner
 from user_workflows.graphical_app.app.patterns import PatternService
@@ -47,7 +47,7 @@ class AppController:
     def _handle_exception(self, action: str, exc: Exception) -> OperationResult:
         message = f"{action} failed: {exc}"
         self.state.notify(message)
-        self.state.add_log(LogLevel.ERROR, message, source="controller")
+        self.state.add_command_log(action, "failure", message, level=LogLevel.ERROR)
         for device_name in ("slm", "camera"):
             self.state.set_device_state(
                 device_name,
@@ -57,9 +57,10 @@ class AppController:
         return failure_result(message, code=type(exc).__name__, details={"action": action})
 
     def _run(self, action: str, fn: Callable[[], Any], ok_message: str, payload: Any | None = None) -> OperationResult:
+        self.state.add_command_log(action, "start", f"Starting {action}")
         try:
             result = fn()
-            self.state.add_log(LogLevel.INFO, ok_message, source="controller")
+            self.state.add_command_log(action, "success", ok_message)
             return success_result(ok_message, payload=result if payload is None else payload)
         except Exception as exc:  # central exception hook for backend errors
             return self._handle_exception(action, exc)
@@ -150,29 +151,81 @@ class AppController:
         def _impl() -> Dict[str, Any]:
             telemetry = self.devices.camera.telemetry()
             self.state.update_camera_telemetry(telemetry)
+            temp_state = self.state.camera_telemetry.get("temperature_status", "unknown")
+            if temp_state in {"warning", "critical"}:
+                temp_c = self.state.camera_telemetry.get("temperature_c", "n/a")
+                msg = f"Camera temperature {temp_c}C reached {temp_state} threshold"
+                self.state.notify(msg)
+                self.state.add_log(LogLevel.WARNING, msg, source="camera")
             return self.state.camera_telemetry
 
         return self._run("camera_telemetry", _impl, "Camera telemetry refreshed")
 
     def run_optimization(self, config: Mapping[str, Any]) -> OperationResult:
         def _impl() -> None:
-            self.state.progress = self.state.progress.__class__(
-                task_name="optimization",
-                current=0,
-                total=int(config.get("iterations", 20)),
-                is_active=True,
-                message="Optimization running",
-            )
+            total = int(config.get("iterations", 20))
+            self.state.start_task("optimization", total=total, message="Optimization running")
             self.state.settings_snapshots.optimizer = dict(config)
             self.optimizer.start(config)
             hist = self.optimizer.history()
             arr = np.array([[x["iteration"], x["objective"]] for x in hist], dtype=float)
             self.plots.update("optimization_convergence", arr)
-            self.state.progress.current = len(hist)
-            self.state.progress.is_active = False
-            self.state.progress.message = "Optimization complete"
+            self.state.update_task("optimization", len(hist), "Optimization complete")
+            self.state.complete_task("optimization", "Optimization complete")
 
         return self._run("run_optimization", _impl, "Optimization complete")
+
+    def cancel_optimization(self) -> OperationResult:
+        def _impl() -> None:
+            self.optimizer.stop()
+            self.state.cancel_task("optimization")
+
+        return self._run("cancel_optimization", _impl, "Optimization cancelled")
+
+    def run_calibration(self, profile_path: str) -> OperationResult:
+        def _impl() -> Dict[str, Any]:
+            self.state.start_task("calibration", total=3, message="Calibration running")
+            profile = CalibrationProfile(
+                name="default",
+                mode=self.state.mode.value,
+                slm_model="simulated_slm",
+                camera_model="simulated_camera",
+                matrix=[[1.0, 0.0], [0.0, 1.0]],
+            )
+            self.state.update_task("calibration", 1, "Saving calibration profile")
+            self.calibration.save_profile(profile, Path(profile_path))
+            self.state.update_task("calibration", 2, "Loading calibration profile")
+            loaded = self.calibration.load_profile(Path(profile_path))
+            self.state.settings_snapshots.calibration = dict(loaded)
+            self.state.update_task("calibration", 3, "Calibration complete")
+            self.state.complete_task("calibration", "Calibration complete")
+            return loaded
+
+        return self._run("run_calibration", _impl, "Calibration complete")
+
+    def cancel_calibration(self) -> OperationResult:
+        def _impl() -> None:
+            self.state.cancel_task("calibration")
+
+        return self._run("cancel_calibration", _impl, "Calibration cancelled")
+
+    def run_sequence(self, sequence_steps: list[Mapping[str, Any]]) -> OperationResult:
+        def _impl() -> list[Dict[str, Any]]:
+            self.sequence.import_sequence(sequence_steps)
+            total = len(sequence_steps)
+            self.state.start_task("sequence", total=total, message="Sequence running")
+            runtime = self.sequence.run(self.state.camera_telemetry)
+            self.state.update_task("sequence", len(runtime), "Sequence complete")
+            self.state.complete_task("sequence", "Sequence complete")
+            return runtime
+
+        return self._run("run_sequence", _impl, "Sequence complete")
+
+    def cancel_sequence(self) -> OperationResult:
+        def _impl() -> None:
+            self.state.cancel_task("sequence")
+
+        return self._run("cancel_sequence", _impl, "Sequence cancelled")
 
     def export_plot(self, name: str, output_dir: str) -> OperationResult:
         return self._run("export_plot", lambda: self.plots.export(name, Path(output_dir)), f"Plot '{name}' exported")
