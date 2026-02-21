@@ -46,6 +46,36 @@ class AppController:
         self.plugins = PluginRegistry()
         self.plugins.load_builtin_patterns()
 
+    def configure_output(self, *, folder: str, template: str, collision_policy: str) -> OperationResult:
+        def _impl() -> dict[str, str]:
+            root = Path(folder).expanduser()
+            root.mkdir(parents=True, exist_ok=True)
+            self.persistence.render_name(template, session=self.state.session_name, run_id="preview", artifact="preview")
+            policy = collision_policy.strip().lower()
+            if policy not in {"increment", "overwrite", "error"}:
+                raise ValueError("collision policy must be one of: increment, overwrite, error")
+
+            self.state.output.folder = str(root)
+            self.state.output.naming_template = template
+            self.state.output.collision_policy = policy
+            return {
+                "folder": self.state.output.folder,
+                "naming_template": self.state.output.naming_template,
+                "collision_policy": self.state.output.collision_policy,
+            }
+
+        return self._run("configure_output", _impl, "Output settings updated")
+
+    def _build_output_path(self, *, artifact: str, run_id: str, extension: str) -> Path:
+        file_name = self.persistence.render_name(
+            self.state.naming_template,
+            session=self.state.session_name,
+            run_id=run_id,
+            artifact=artifact,
+        )
+        candidate = Path(self.state.output_directory) / f"{file_name}.{extension.lstrip('.')}"
+        return self.persistence.resolve_path(candidate, self.state.collision_policy)
+
     def _calibration_identifiers(self) -> dict[str, str]:
         return {
             "mode": self.state.mode.value,
@@ -390,9 +420,21 @@ class AppController:
     def optimization_progress(self) -> OperationResult:
         return self._run("optimization_progress", lambda: dict(self.optimizer.progress()), "Optimization progress fetched")
 
-    def export_optimization_history(self, out_path: str) -> OperationResult:
+    def export_optimization_history(self, out_path: str | None = None, *, run_id: str | None = None) -> OperationResult:
         def _impl() -> Dict[str, Any]:
             run_meta = {
+                "software_version": "0.1.0",
+                "mode": self.state.mode.value,
+                "devices": dict(self.state.device_status),
+                "camera_settings": dict(self.state.settings_snapshots.camera),
+                "blaze": {
+                    "enabled": self.state.blaze.enabled,
+                    "kx": self.state.blaze.kx,
+                    "ky": self.state.blaze.ky,
+                    "offset": self.state.blaze.offset,
+                    "scale": self.state.blaze.scale,
+                },
+                "calibration": dict(self.state.settings_snapshots.calibration),
                 "optimizer_snapshot": dict(self.state.settings_snapshots.optimizer),
             }
             if self.state.active_run is not None:
@@ -401,7 +443,8 @@ class AppController:
                     "mode": self.state.active_run.mode.value,
                     "parameters": dict(self.state.active_run.parameters),
                 })
-            out = Path(out_path)
+            effective_run_id = run_id or (self.state.active_run.run_id if self.state.active_run is not None else "run")
+            out = Path(out_path) if out_path else self._build_output_path(artifact="data_optimization_history", run_id=effective_run_id, extension="csv")
             self.optimizer.export_history(out, run_metadata=run_meta)
             return {"csv": str(out), "json": str(out.with_suffix(".json"))}
 
@@ -528,11 +571,38 @@ class AppController:
     def reset_plot(self, name: str) -> OperationResult:
         return self._run("reset_plot", lambda: self.plots.reset_view(name), f"Plot '{name}' reset")
 
-    def export_plot(self, name: str, output_dir: str) -> OperationResult:
-        return self._run("export_plot", lambda: self.plots.export(name, Path(output_dir)), f"Plot '{name}' exported")
+    def export_plot(self, name: str, output_dir: str | None = None, *, run_id: str | None = None) -> OperationResult:
+        def _impl() -> Dict[str, str]:
+            effective_run_id = run_id or (self.state.active_run.run_id if self.state.active_run is not None else "run")
+            if output_dir:
+                root = Path(output_dir)
+            else:
+                root = Path(self.state.output_directory)
+            root.mkdir(parents=True, exist_ok=True)
+            artifact_base = self.persistence.render_name(
+                self.state.naming_template,
+                session=self.state.session_name,
+                run_id=effective_run_id,
+                artifact=f"plot_{name}",
+            )
+            out_dir = self.persistence.resolve_path(root / artifact_base, self.state.collision_policy)
+            exported = self.plots.export(name, out_dir)
+            return {
+                "image_path": str(exported.image_path),
+                "data_path": str(exported.data_path),
+                "metadata_path": str(exported.metadata_path),
+            }
 
-    def save_session_snapshot(self, path: str) -> OperationResult:
-        return self._run("save_session_snapshot", lambda: self.persistence.snapshot_session(self.state, Path(path)), "Session snapshot saved")
+        return self._run("export_plot", _impl, f"Plot '{name}' exported")
+
+    def save_session_snapshot(self, path: str | None = None, *, run_id: str | None = None) -> OperationResult:
+        def _impl() -> str:
+            effective_run_id = run_id or (self.state.active_run.run_id if self.state.active_run is not None else "run")
+            out = Path(path) if path else self._build_output_path(artifact="metadata_session_snapshot", run_id=effective_run_id, extension="json")
+            self.persistence.snapshot_session(self.state, out)
+            return str(out)
+
+        return self._run("save_session_snapshot", _impl, "Session snapshot saved")
 
     def output_name_preview(self, artifact: str, run_id: str) -> OperationResult:
         return self._run(

@@ -134,6 +134,7 @@ def test_camera_temperature_logging_occurs_on_refresh():
 
 def test_optimization_controls_and_export(tmp_path):
     c = AppController()
+    c.configure_output(folder=str(tmp_path), template="{date}_{session}_{run_id}_{artifact}", collision_policy="increment")
     c.start_run("run-opt", {"purpose": "optimization"})
     result = c.start_optimization({"wgs": {"max_iterations": 6, "gain": 0.15}})
     assert result.success
@@ -146,18 +147,21 @@ def test_optimization_controls_and_export(tmp_path):
     assert c.resume_optimization().success
     assert c.stop_optimization().success
 
-    out = tmp_path / "optimization_history.csv"
-    export = c.export_optimization_history(str(out))
+    export = c.export_optimization_history(run_id="run-opt")
     assert export.success
+    out = Path(export.payload["csv"])
     assert out.exists()
     sidecar = out.with_suffix(".json")
     assert sidecar.exists()
     payload = c.persistence.load_json(sidecar)
     assert payload["run_metadata"]["run_id"] == "run-opt"
+    assert payload["run_metadata"]["software_version"] == "0.1.0"
+    assert payload["run_metadata"]["blaze"]["enabled"] is False
 
 
 def test_ratio_target_optimization_and_export(tmp_path):
     c = AppController()
+    c.configure_output(folder=str(tmp_path), template="{date}_{session}_{run_id}_{artifact}", collision_policy="increment")
     config = {
         "wgs": {"max_iterations": 4, "gain": 0.1},
         "ratio_mode": "simulation",
@@ -177,9 +181,9 @@ def test_ratio_target_optimization_and_export(tmp_path):
     ratio_plot = c.plots.get_plot_model("ratio_targets_vs_measured")
     assert ratio_plot.data.shape[0] == 2
 
-    out = tmp_path / "ratio_history.csv"
-    exported = c.export_optimization_history(str(out))
+    exported = c.export_optimization_history(run_id="ratio-run")
     assert exported.success
+    out = Path(exported.payload["csv"])
     payload = c.persistence.load_json(out.with_suffix(".json"))
     assert payload["ratio_mode"] == "simulation"
     assert payload["target_definition"]["beam_count"] == 3
@@ -234,3 +238,47 @@ def test_calibration_apply_blocked_on_incompatible_profile(tmp_path):
     applied = c.apply_calibration_profile(str(path))
     assert applied.success is False
     assert "compatibility failed" in applied.message.lower()
+
+
+def test_naming_engine_applies_to_plot_data_and_snapshot_exports(tmp_path):
+    c = AppController()
+    configured = c.configure_output(
+        folder=str(tmp_path),
+        template="{date}_{session}_{run_id}_{artifact}",
+        collision_policy="increment",
+    )
+    assert configured.success
+
+    generated = c.generate_pattern("single-gaussian", {"kx": 0.01, "ky": 0.02})
+    assert generated.success
+    c.simulate_before_apply(generated.payload)
+
+    plot_export = c.export_plot("simulated_phase", run_id="abc")
+    assert plot_export.success
+    image_path = Path(plot_export.payload["image_path"])
+    assert image_path.exists()
+    assert "plot_simulated_phase" in image_path.parent.name
+
+    opt_export = c.export_optimization_history(run_id="abc")
+    assert opt_export.success
+    opt_path = Path(opt_export.payload["csv"])
+    assert opt_path.exists()
+    assert "data_optimization_history" in opt_path.name
+
+    snapshot = c.save_session_snapshot(run_id="abc")
+    assert snapshot.success
+    snap_path = Path(snapshot.payload)
+    assert snap_path.exists()
+    snap_payload = c.persistence.load_json(snap_path)
+    assert "metadata_snapshot" in snap_payload
+    assert snap_payload["metadata_snapshot"]["software_version"] == "0.1.0"
+
+
+def test_collision_policy_error_blocks_rewrite(tmp_path):
+    c = AppController()
+    assert c.configure_output(folder=str(tmp_path), template="{date}_{session}_{run_id}_{artifact}", collision_policy="error").success
+    first = c.save_session_snapshot(run_id="same")
+    assert first.success
+    second = c.save_session_snapshot(run_id="same")
+    assert second.success is False
+    assert "already exists" in second.message.lower()

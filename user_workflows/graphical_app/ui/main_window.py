@@ -404,6 +404,29 @@ class MainWindow(tk.Tk):
 
     def _build_session_panel(self) -> None:
         frm = self._create_panel("Session", "right")
+        ttk.Label(frm, text="Output directory").pack(anchor="w")
+        self.output_dir_var = tk.StringVar(value=self.controller.state.output_directory)
+        ttk.Entry(frm, textvariable=self.output_dir_var).pack(fill=tk.X)
+        ttk.Button(frm, text="Browse Output Directory", command=self._bind_safe("choose_output_dir", self._choose_output_dir)).pack(fill=tk.X)
+
+        ttk.Label(frm, text="Naming template").pack(anchor="w")
+        self.naming_template_var = tk.StringVar(value=self.controller.state.naming_template)
+        ttk.Entry(frm, textvariable=self.naming_template_var).pack(fill=tk.X)
+
+        ttk.Label(frm, text="Collision policy").pack(anchor="w")
+        self.collision_policy_var = tk.StringVar(value=self.controller.state.collision_policy)
+        ttk.Combobox(frm, textvariable=self.collision_policy_var, values=["increment", "overwrite", "error"], state="readonly").pack(fill=tk.X)
+
+        ttk.Label(frm, text="Run ID override").pack(anchor="w")
+        self.run_override_var = tk.StringVar(value="")
+        ttk.Entry(frm, textvariable=self.run_override_var).pack(fill=tk.X)
+        ttk.Button(frm, text="Apply Output Settings", command=self._bind_safe("apply_output_settings", self._apply_output_settings)).pack(fill=tk.X)
+
+        self.name_preview_var = tk.StringVar(value="Name preview: n/a")
+        ttk.Label(frm, textvariable=self.name_preview_var).pack(anchor="w")
+        ttk.Button(frm, text="Preview Current Template", command=self._bind_safe("preview_naming", self._preview_naming)).pack(fill=tk.X)
+
+        ttk.Separator(frm, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=4)
         ttk.Button(frm, text="Save Layout", command=self._bind_safe("save_layout", self.save_layout)).pack(fill=tk.X)
         ttk.Button(frm, text="Restore Layout", command=self._bind_safe("restore_layout", self.restore_layout)).pack(fill=tk.X)
         ttk.Button(frm, text="Reset Layout", command=self._bind_safe("reset_layout", self._reset_layout)).pack(fill=tk.X)
@@ -653,8 +676,8 @@ class MainWindow(tk.Tk):
                 )
 
     def _export_optimization_history(self) -> None:
-        out = filedialog.asksaveasfilename(defaultextension=".csv") or "user_workflows/output/optimization_history.csv"
-        self._handle_result(self.controller.export_optimization_history(out))
+        run_id = self._effective_run_override()
+        self._handle_result(self.controller.export_optimization_history(run_id=run_id))
 
     def _run_sequence(self) -> None:
         steps = json.loads(self.sequence_entry.get())
@@ -730,11 +753,40 @@ class MainWindow(tk.Tk):
         self.plot_popouts[plot_name] = popout
 
     def _export_plot(self) -> None:
-        output = filedialog.askdirectory() or "user_workflows/output"
-        self._handle_result(self.controller.export_plot(self.plot_select.get(), output))
+        run_id = self._effective_run_override()
+        self._handle_result(self.controller.export_plot(self.plot_select.get(), run_id=run_id))
 
     def _save_snapshot(self) -> None:
-        self._handle_result(self.controller.save_session_snapshot("user_workflows/output/session_snapshot.json"))
+        run_id = self._effective_run_override()
+        self._handle_result(self.controller.save_session_snapshot(run_id=run_id))
+
+    def _choose_output_dir(self) -> None:
+        selected = filedialog.askdirectory(initialdir=self.output_dir_var.get() or ".")
+        if selected:
+            self.output_dir_var.set(selected)
+
+    def _effective_run_override(self) -> str | None:
+        value = self.run_override_var.get().strip()
+        return value or None
+
+    def _apply_output_settings(self) -> None:
+        folder = self.output_dir_var.get().strip()
+        if not folder:
+            self.status_var.set("Output directory is required")
+            return
+        result = self.controller.configure_output(
+            folder=folder,
+            template=self.naming_template_var.get().strip(),
+            collision_policy=self.collision_policy_var.get(),
+        )
+        self._handle_result(result)
+
+    def _preview_naming(self) -> None:
+        run_id = self._effective_run_override() or "run"
+        result = self.controller.output_name_preview("preview", run_id)
+        self._handle_result(result)
+        if result.success:
+            self.name_preview_var.set(f"Name preview: {result.payload}")
 
     def _move_selected_panel_to_column(self) -> None:
         panel_name = self.arrange_panel.get()
