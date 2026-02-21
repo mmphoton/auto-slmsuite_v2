@@ -409,6 +409,45 @@ def milestone_gate_report(*, smoke_suite_passed: bool) -> dict[str, bool]:
     }
 
 
+def milestone_gate_report(*, smoke_suite_passed: bool) -> dict[str, bool]:
+    matrix = backend_to_gui_matrix()
+    sim_hw = sim_hw_matrix()
+
+    m1 = matrix["ui_controller_boundary_only"] and matrix["mode_switching"]
+    m2 = matrix["multipage_navigation_shell"] and matrix["layout_persistence"]
+    m3 = matrix["connect_release_actions"]
+    m4 = smoke_suite_passed
+    m5 = matrix["pattern_parameter_form_parity"]
+    m6 = matrix["blaze_always_applied"]
+    m7 = matrix["camera_typed_controls"]
+    m8 = matrix["plot_popout_behavior"] and matrix["plot_edit_behavior"] and matrix["plot_export_behavior"]
+    m9 = matrix["optimization_controls"] and matrix["optimization_outputs"]
+    m10 = smoke_suite_passed
+    m11 = matrix["calibration_load_validate"]
+    m12 = matrix["session_snapshot_outputs"]
+    m13 = all(matrix.values()) and all(
+        sim_hw[capability][mode]["status"] == "PASS"
+        for capability in sim_hw
+        for mode in sim_hw[capability]
+    ) and smoke_suite_passed
+
+    return {
+        "M1": m1,
+        "M2": m2,
+        "M3": m3,
+        "M4": m4,
+        "M5": m5,
+        "M6": m6,
+        "M7": m7,
+        "M8": m8,
+        "M9": m9,
+        "M10": m10,
+        "M11": m11,
+        "M12": m12,
+        "M13": m13,
+    }
+
+
 def release_freeze_ready(*, smoke_suite_passed: bool) -> dict[str, bool]:
     matrix = backend_to_gui_matrix()
     gates = milestone_gate_report(smoke_suite_passed=smoke_suite_passed)
