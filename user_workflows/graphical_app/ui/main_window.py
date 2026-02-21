@@ -10,6 +10,7 @@ from tkinter import filedialog, ttk
 from user_workflows.graphical_app.app.controller import AppController
 from user_workflows.graphical_app.app.interfaces import OperationResult
 from user_workflows.graphical_app.app.state import LogLevel
+from user_workflows.graphical_app.ui.pattern_form import PatternFormRenderer, parity_check_for_schema
 
 
 class MainWindow(tk.Tk):
@@ -21,6 +22,7 @@ class MainWindow(tk.Tk):
         self.store = self.controller.persistence
         self.title("SLM Suite Graphical App")
         self.layout_path = Path("user_workflows/output/gui_layout.json")
+        self.pattern_presets_path = Path("user_workflows/output/pattern_presets.json")
 
         self.panel_frames: dict[str, ttk.LabelFrame] = {}
         self.panel_columns: dict[str, str] = {}
@@ -96,15 +98,27 @@ class MainWindow(tk.Tk):
     def _build_slm_panel(self) -> None:
         frm = self._create_panel("SLM", "center")
         pattern_options = self.controller.available_patterns().payload or []
-        self.pattern_name = tk.StringVar(value="single-gaussian")
-        ttk.Combobox(frm, textvariable=self.pattern_name, values=pattern_options).pack(fill=tk.X)
-        self.param_entry = ttk.Entry(frm)
-        self.param_entry.insert(0, '{"kx":0.0,"ky":0.01}')
-        self.param_entry.pack(fill=tk.X)
+        default_pattern = pattern_options[0] if pattern_options else "single-gaussian"
+        self.pattern_name = tk.StringVar(value=default_pattern)
+        self.pattern_combo = ttk.Combobox(frm, textvariable=self.pattern_name, values=pattern_options, state="readonly")
+        self.pattern_combo.pack(fill=tk.X)
+        self.pattern_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_pattern_change())
+
+        self.pattern_form = PatternFormRenderer(frm)
+        self.pattern_form.pack(fill=tk.X, pady=4)
+
+        self.preset_name = tk.StringVar(value="default")
+        ttk.Label(frm, text="Pattern preset name:").pack(anchor="w")
+        ttk.Entry(frm, textvariable=self.preset_name).pack(fill=tk.X)
+        ttk.Button(frm, text="Save Pattern Preset", command=self._bind_safe("save_pattern_preset", self._save_pattern_preset)).pack(fill=tk.X)
+        ttk.Button(frm, text="Load Pattern Preset", command=self._bind_safe("load_pattern_preset", self._load_pattern_preset)).pack(fill=tk.X)
+        ttk.Button(frm, text="Reset Parameters", command=self._bind_safe("reset_pattern_params", self._reset_pattern_params)).pack(fill=tk.X)
+
         ttk.Button(frm, text="Simulate Before Apply", command=self._bind_safe("simulate", self._simulate)).pack(fill=tk.X)
         ttk.Button(frm, text="Apply", command=self._bind_safe("apply", self._apply)).pack(fill=tk.X)
         ttk.Button(frm, text="Queue", command=self._bind_safe("queue", self._queue)).pack(fill=tk.X)
         ttk.Button(frm, text="Clear Queue", command=self._bind_safe("clear_queue", lambda: self._handle_result(self.controller.clear_pattern_queue()))).pack(fill=tk.X)
+        self._on_pattern_change()
 
     def _build_camera_panel(self) -> None:
         frm = self._create_panel("Camera", "right")
@@ -202,26 +216,72 @@ class MainWindow(tk.Tk):
     def _set_mode(self) -> None:
         self._handle_result(self.controller.set_mode(self.mode.get()))
 
+    def _on_pattern_change(self) -> None:
+        schema = self.controller.patterns.schema_for(self.pattern_name.get())
+        self.pattern_form.render(schema)
+        parity_issues = parity_check_for_schema(schema, self.pattern_form.represented_fields())
+        if parity_issues:
+            raise ValueError("; ".join(parity_issues))
+
+    def _collect_pattern_params(self) -> dict[str, object] | None:
+        params, errors = self.pattern_form.collect_values()
+        if errors:
+            self.status_var.set("Pattern parameter errors: " + "; ".join(errors))
+            self.controller.state.notify(self.status_var.get())
+            self.controller.state.add_log(LogLevel.ERROR, self.status_var.get(), source="ui")
+            self._refresh_logs()
+            return None
+        return params
+
     def _simulate(self) -> None:
-        params = json.loads(self.param_entry.get())
+        params = self._collect_pattern_params()
+        if params is None:
+            return
         pattern_result = self.controller.generate_pattern(self.pattern_name.get(), params)
         self._handle_result(pattern_result)
         if pattern_result.success and pattern_result.payload is not None:
             self._handle_result(self.controller.simulate_before_apply(pattern_result.payload))
 
     def _apply(self) -> None:
-        params = json.loads(self.param_entry.get())
+        params = self._collect_pattern_params()
+        if params is None:
+            return
         pattern_result = self.controller.generate_pattern(self.pattern_name.get(), params)
         self._handle_result(pattern_result)
         if pattern_result.success and pattern_result.payload is not None:
             self._handle_result(self.controller.apply_pattern(pattern_result.payload))
 
     def _queue(self) -> None:
-        params = json.loads(self.param_entry.get())
+        params = self._collect_pattern_params()
+        if params is None:
+            return
         pattern_result = self.controller.generate_pattern(self.pattern_name.get(), params)
         self._handle_result(pattern_result)
         if pattern_result.success and pattern_result.payload is not None:
             self._handle_result(self.controller.queue_pattern(pattern_result.payload))
+
+    def _save_pattern_preset(self) -> None:
+        params = self._collect_pattern_params()
+        if params is None:
+            return
+        payload = self.store.load_json(self.pattern_presets_path)
+        presets = payload.get("presets", {})
+        presets.setdefault(self.pattern_name.get(), {})[self.preset_name.get()] = params
+        self.store.save_json(self.pattern_presets_path, {"presets": presets})
+        self.status_var.set(f"Saved preset '{self.preset_name.get()}' for {self.pattern_name.get()}")
+
+    def _load_pattern_preset(self) -> None:
+        payload = self.store.load_json(self.pattern_presets_path)
+        preset = payload.get("presets", {}).get(self.pattern_name.get(), {}).get(self.preset_name.get())
+        if preset is None:
+            self.status_var.set(f"Preset '{self.preset_name.get()}' not found for {self.pattern_name.get()}")
+            return
+        self.pattern_form.set_values(preset)
+        self.status_var.set(f"Loaded preset '{self.preset_name.get()}' for {self.pattern_name.get()}")
+
+    def _reset_pattern_params(self) -> None:
+        self.pattern_form.reset_to_defaults()
+        self.status_var.set(f"Reset parameters for {self.pattern_name.get()}")
 
     def _configure_camera(self) -> None:
         self._handle_result(self.controller.configure_camera(json.loads(self.camera_settings.get())))
