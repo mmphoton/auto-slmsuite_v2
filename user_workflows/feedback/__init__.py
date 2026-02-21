@@ -1,1 +1,1 @@
-"""Feedback workflow helpers."""
+"""Feedback-oriented user workflows."""
