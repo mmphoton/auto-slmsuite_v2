@@ -11,6 +11,14 @@ from slmsuite.holography.algorithms import SpotHologram
 
 import time
 
+from user_workflows.calibration_io import assert_required_calibration_files
+
+CALIBRATION_ROOT = "user_workflows/calibrations"
+calibration_paths = assert_required_calibration_files(CALIBRATION_ROOT)
+FOURIER_CALIBRATION_FILE = calibration_paths["fourier"]
+WAVEFRONT_CALIBRATION_FILE = calibration_paths["wavefront_superpixel"]
+SOURCE_AMPLITUDE_CORRECTED = np.load(calibration_paths["source_amplitude"])
+
 # === PARAMETERS ===
 
 # Gaussian beam radius (std dev) in pixels
