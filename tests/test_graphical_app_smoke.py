@@ -48,18 +48,25 @@ def test_run_gui_app_bootstrap_path():
     assert str(repo_root) in sys.path
 
 
-def test_gui_capability_checklist_has_phase_gates():
+def test_gui_capability_checklist_has_hard_milestone_gates():
     checklist = Path("user_workflows/graphical_app/qa/gui_capability_checklist.md")
     content = checklist.read_text(encoding="utf-8")
 
-    assert "gui-integration" in content
-    assert "gui-phase-1-foundation" in content
-    assert "gui-phase-2-devices" in content
-    assert "gui-phase-3-patterns-and-plots" in content
-    assert "gui-phase-4-optimization-calibration-sequences" in content
-    assert "gui-phase-5-persistence-and-release-readiness" in content
-    assert "Smoke tests pass" in content
-    assert "Manual UI checklist" in content
+    assert "Sequential Hard Gates" in content
+    assert "Milestones execute strictly in order (1 -> 13)." in content
+    assert "M13 Hard QA release blocker" in content
+    assert "binary: `PASS` or `FAIL`" in content
+
+
+def test_umbrella_stream_defines_all_mandatory_milestones():
+    stream = Path("user_workflows/graphical_app/qa/umbrella_implementation_stream.md")
+    content = stream.read_text(encoding="utf-8")
+
+    assert "single master task" in content
+    assert "Milestone 2 — Multi-page navigation shell" in content
+    assert "Device & Mode" in content
+    assert "Logs/Diagnostics" in content
+    assert "Milestone 13 — Hard QA gate (release blocker)" in content
 
 
 def test_blaze_composition_pipeline_and_snapshot_metadata(tmp_path):
@@ -415,3 +422,19 @@ def test_release_freeze_requires_matrix_coverage_and_smoke_pass():
     assert ready["coverage_complete"] is True
     assert ready["smoke_suite_passed"] is True
     assert ready["release_freeze_ready"] is True
+
+
+def test_main_window_declares_required_notebook_pages():
+    source = Path("user_workflows/graphical_app/ui/main_window.py").read_text(encoding="utf-8")
+    assert "PAGE_TITLES" in source
+    for page in (
+        "Device & Mode",
+        "SLM Patterns & Blaze",
+        "Camera & Telemetry",
+        "Plot Workspace",
+        "Optimization (WGS + Ratio)",
+        "Calibration",
+        "Session/Output/Recipes",
+        "Logs/Diagnostics",
+    ):
+        assert page in source
