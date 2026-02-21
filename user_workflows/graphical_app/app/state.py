@@ -88,6 +88,16 @@ class RunMetadata:
     calibration_profile: Optional[str] = None
     optimizer: Dict[str, Any] = field(default_factory=dict)
     telemetry: Dict[str, Any] = field(default_factory=dict)
+    blaze: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class BlazeConfig:
+    enabled: bool = False
+    kx: float = 0.0
+    ky: float = 0.0
+    offset: Optional[float] = None
+    scale: Optional[float] = None
 
 
 @dataclass
@@ -121,6 +131,7 @@ class AppState:
             "critical_c": -45.0,
         }
     )
+    blaze: BlazeConfig = field(default_factory=BlazeConfig)
 
     @property
     def mode(self) -> Mode:

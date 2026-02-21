@@ -60,3 +60,27 @@ def test_gui_capability_checklist_has_phase_gates():
     assert "gui-phase-5-persistence-and-release-readiness" in content
     assert "Smoke tests pass" in content
     assert "Manual UI checklist" in content
+
+
+def test_blaze_composition_pipeline_and_snapshot_metadata(tmp_path):
+    c = AppController()
+    base = c.generate_pattern("single-gaussian", {"kx": 0.01, "ky": 0.0}).payload
+    c.configure_blaze({"enabled": True, "kx": 0.2, "ky": -0.1, "offset": 0.3, "scale": 0.8})
+
+    sim = c.simulate_before_apply(base)
+    assert sim.success
+    composed = sim.payload["simulated_phase"]
+    assert composed.shape == base.shape
+    assert not (composed == base).all()
+
+    assert c.apply_pattern(base).success
+    assert c.queue_pattern(base).success
+
+    c.start_run("run-with-blaze", {"purpose": "test"})
+    assert c.state.active_run is not None
+    assert c.state.active_run.blaze["enabled"] is True
+    snapshot = tmp_path / "session_snapshot.json"
+    c.save_session_snapshot(str(snapshot))
+    payload = c.persistence.load_json(snapshot)
+    assert payload["blaze"]["enabled"] is True
+    assert payload["blaze"]["kx"] == 0.2
