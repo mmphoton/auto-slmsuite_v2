@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import asdict
 from datetime import datetime
@@ -11,6 +12,69 @@ from typing import Any, Dict, Mapping
 import numpy as np
 
 from user_workflows.graphical_app.app.state import AppState
+
+
+DEFAULT_LAYOUT_MODEL: Dict[str, Any] = {
+    "window_geometry": "1400x900",
+    "columns": {
+        "left": ["Device", "Optimization", "Logs", "Session"],
+        "center": ["SLM", "Plots"],
+        "right": ["Camera", "Calibration"],
+    },
+    "visibility": {
+        "Device": True,
+        "SLM": True,
+        "Camera": True,
+        "Plots": True,
+        "Optimization": True,
+        "Calibration": True,
+        "Logs": True,
+        "Session": True,
+    },
+    "sashes": {"main": [400, 1000]},
+    "popout_plots": [],
+}
+
+
+PRESET_LAYOUT_MODELS: Dict[str, Dict[str, Any]] = {
+    "Acquisition": {
+        **DEFAULT_LAYOUT_MODEL,
+        "columns": {
+            "left": ["Device", "Camera", "Session"],
+            "center": ["SLM", "Plots"],
+            "right": ["Optimization", "Calibration", "Logs"],
+        },
+        "visibility": {
+            **DEFAULT_LAYOUT_MODEL["visibility"],
+            "Optimization": False,
+            "Calibration": False,
+        },
+    },
+    "Optimization": {
+        **DEFAULT_LAYOUT_MODEL,
+        "columns": {
+            "left": ["Device", "SLM", "Session"],
+            "center": ["Plots", "Optimization"],
+            "right": ["Camera", "Calibration", "Logs"],
+        },
+        "visibility": {
+            **DEFAULT_LAYOUT_MODEL["visibility"],
+            "Calibration": False,
+        },
+    },
+    "Calibration": {
+        **DEFAULT_LAYOUT_MODEL,
+        "columns": {
+            "left": ["Device", "Camera", "Session"],
+            "center": ["Calibration", "Plots"],
+            "right": ["SLM", "Optimization", "Logs"],
+        },
+        "visibility": {
+            **DEFAULT_LAYOUT_MODEL["visibility"],
+            "Optimization": False,
+        },
+    },
+}
 
 
 class PersistenceStore:
@@ -39,3 +103,27 @@ class PersistenceStore:
         payload = asdict(state)
         payload["software_version"] = software_version
         self.save_json(path, payload)
+
+    def default_layout_model(self) -> Dict[str, Any]:
+        return copy.deepcopy(DEFAULT_LAYOUT_MODEL)
+
+    def preset_layout_model(self, preset_name: str) -> Dict[str, Any]:
+        base = PRESET_LAYOUT_MODELS.get(preset_name)
+        if base is None:
+            return self.default_layout_model()
+        return copy.deepcopy(base)
+
+    def save_layout_model(self, path: Path, model: Mapping[str, Any]) -> None:
+        self.save_json(path, model)
+
+    def load_layout_model(self, path: Path) -> Dict[str, Any]:
+        payload = self.load_json(path)
+        if not payload:
+            return self.default_layout_model()
+
+        merged = self.default_layout_model()
+        merged.update({k: v for k, v in payload.items() if k not in {"columns", "visibility", "sashes"}})
+        merged["columns"].update(payload.get("columns", {}))
+        merged["visibility"].update(payload.get("visibility", {}))
+        merged["sashes"].update(payload.get("sashes", {}))
+        return merged
