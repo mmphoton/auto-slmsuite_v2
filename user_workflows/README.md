@@ -66,6 +66,7 @@ You can select from four analytical pattern families using `--pattern`:
 - `double-gaussian` (two Gaussian-like spots separated by `--double-sep-kxy`)
 - `gaussian-lattice` (rectangular lattice of Gaussian-like spots)
 - `laguerre-gaussian` (LG phase mode with `--lg-l`, `--lg-p`)
+- `composite` (ordered composition of child patterns like LG + lattice)
 
 Examples:
 
@@ -86,3 +87,14 @@ python user_workflows/run_slm_andor.py --pattern laguerre-gaussian --lg-l 2 --lg
 Useful optimization knobs for spot-based patterns:
 - `--holo-method` (default `WGS-Kim`)
 - `--holo-maxiter` (default `30`)
+
+Composite config example (for workflow code that consumes pattern config dictionaries):
+
+```yaml
+pattern: composite
+mode: phase_add_wrap
+spot_union: true
+children:
+  - laguerre-gaussian
+  - gaussian-lattice
+```
