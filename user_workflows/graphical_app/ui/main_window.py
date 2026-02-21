@@ -116,7 +116,7 @@ class PlotWidget(ttk.Frame):
 
 
 class MainWindow(tk.Tk):
-    PANEL_NAMES = ["Device", "SLM", "Camera", "Plots", "Optimization", "Calibration", "Logs", "Session"]
+    PANEL_NAMES = ["Device", "SLM", "Camera", "Plots", "Optimization", "Ratio Targets", "Calibration", "Logs", "Session"]
 
     def __init__(self, controller: AppController) -> None:
         super().__init__()
@@ -177,6 +177,7 @@ class MainWindow(tk.Tk):
         self._build_camera_panel()
         self._build_plot_panel()
         self._build_optimization_panel()
+        self._build_ratio_targets_panel()
         self._build_calibration_panel()
         self._build_logs_panel()
         self._build_session_panel()
@@ -297,7 +298,7 @@ class MainWindow(tk.Tk):
 
     def _build_plot_panel(self) -> None:
         frm = self._create_panel("Plots", "center")
-        self.plot_names = ["simulated_phase", "simulated_intensity", "experimental_intensity", "optimization_convergence", "optimization_phase_before", "optimization_phase_after", "optimization_intensity_before", "optimization_intensity_after"]
+        self.plot_names = ["simulated_phase", "simulated_intensity", "experimental_intensity", "optimization_convergence", "optimization_phase_before", "optimization_phase_after", "optimization_intensity_before", "optimization_intensity_after", "ratio_targets_vs_measured", "ratio_error_by_beam", "ratio_metrics"]
         self.plot_select = tk.StringVar(value=self.plot_names[0])
         ttk.Combobox(frm, textvariable=self.plot_select, values=self.plot_names, state="readonly").pack(fill=tk.X)
         ttk.Button(frm, text="Pop-out Plot", command=self._bind_safe("pop_plot", self._pop_plot)).pack(fill=tk.X)
@@ -336,6 +337,51 @@ class MainWindow(tk.Tk):
         self.optimization_progress.pack(fill=tk.X, pady=3)
         self.optimization_progress_label = ttk.Label(frm, text="idle")
         self.optimization_progress_label.pack(anchor="w")
+
+    def _build_ratio_targets_panel(self) -> None:
+        frm = self._create_panel("Ratio Targets", "left")
+        ttk.Label(frm, text="Mode").pack(anchor="w")
+        self.ratio_mode = tk.StringVar(value="simulation")
+        ttk.Combobox(frm, textvariable=self.ratio_mode, values=["simulation", "camera"], state="readonly").pack(fill=tk.X)
+
+        ttk.Label(frm, text="Beam count").pack(anchor="w")
+        self.ratio_beam_count = tk.StringVar(value="3")
+        ttk.Entry(frm, textvariable=self.ratio_beam_count).pack(fill=tk.X)
+
+        ttk.Label(frm, text="Beam positions [[x,y],...]").pack(anchor="w")
+        self.ratio_positions = ttk.Entry(frm)
+        self.ratio_positions.insert(0, "[[32,32],[64,64],[96,96]]")
+        self.ratio_positions.pack(fill=tk.X)
+
+        ttk.Label(frm, text="Desired ratios [..]").pack(anchor="w")
+        self.ratio_desired = ttk.Entry(frm)
+        self.ratio_desired.insert(0, "[0.2,0.3,0.5]")
+        self.ratio_desired.pack(fill=tk.X)
+
+        ttk.Label(frm, text="Lattice geometry").pack(anchor="w")
+        self.ratio_lattice_geometry = tk.StringVar(value="square")
+        ttk.Combobox(frm, textvariable=self.ratio_lattice_geometry, values=["square", "hex", "line"], state="readonly").pack(fill=tk.X)
+
+        ttk.Label(frm, text="Lattice spacing").pack(anchor="w")
+        self.ratio_lattice_spacing = tk.StringVar(value="12.0")
+        ttk.Entry(frm, textvariable=self.ratio_lattice_spacing).pack(fill=tk.X)
+
+        ttk.Label(frm, text="Lattice rotation (deg)").pack(anchor="w")
+        self.ratio_lattice_rotation = tk.StringVar(value="0.0")
+        ttk.Entry(frm, textvariable=self.ratio_lattice_rotation).pack(fill=tk.X)
+
+        ttk.Label(frm, text="Objective weights [intensity/ratio/regularization]").pack(anchor="w")
+        self.weight_intensity = tk.StringVar(value="1.0")
+        self.weight_ratio = tk.StringVar(value="0.5")
+        self.weight_regularization = tk.StringVar(value="0.05")
+        weight_row = ttk.Frame(frm)
+        weight_row.pack(fill=tk.X)
+        ttk.Entry(weight_row, textvariable=self.weight_intensity, width=8).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Entry(weight_row, textvariable=self.weight_ratio, width=8).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Entry(weight_row, textvariable=self.weight_regularization, width=8).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.ratio_metrics_var = tk.StringVar(value="ratio metrics: n/a")
+        ttk.Label(frm, textvariable=self.ratio_metrics_var).pack(anchor="w", pady=(4, 0))
 
     def _build_calibration_panel(self) -> None:
         frm = self._create_panel("Calibration", "right")
@@ -583,7 +629,31 @@ class MainWindow(tk.Tk):
             "max_iterations": int(self.optimization_max_iters.get()),
             "gain": float(self.optimization_gain.get()),
         }
-        self._handle_result(self.controller.start_optimization(config))
+        config["ratio_mode"] = self.ratio_mode.get()
+        config["target_definition"] = {
+            "beam_count": int(self.ratio_beam_count.get()),
+            "beam_positions": json.loads(self.ratio_positions.get()),
+            "desired_ratios": json.loads(self.ratio_desired.get()),
+            "lattice": {
+                "geometry": self.ratio_lattice_geometry.get(),
+                "spacing": float(self.ratio_lattice_spacing.get()),
+                "rotation_deg": float(self.ratio_lattice_rotation.get()),
+            },
+        }
+        config["ratio_targets"] = {"desired_ratios": json.loads(self.ratio_desired.get())}
+        config["objective_weights"] = {
+            "intensity": float(self.weight_intensity.get()),
+            "ratio": float(self.weight_ratio.get()),
+            "regularization": float(self.weight_regularization.get()),
+        }
+        result = self.controller.start_optimization(config)
+        self._handle_result(result)
+        if result.success and isinstance(result.payload, dict):
+            metrics = result.payload.get("ratio_metrics", {})
+            if isinstance(metrics, dict) and metrics:
+                self.ratio_metrics_var.set(
+                    f"ratio metrics: MAE={metrics.get('mean_abs_error', 0.0):.4f}, max={metrics.get('max_abs_error', 0.0):.4f}"
+                )
 
     def _export_optimization_history(self) -> None:
         out = filedialog.asksaveasfilename(defaultextension=".csv") or "user_workflows/output/optimization_history.csv"
