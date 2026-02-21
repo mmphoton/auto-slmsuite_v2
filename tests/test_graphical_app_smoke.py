@@ -4,7 +4,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from user_workflows.graphical_app.app.controller import AppController
 from user_workflows.graphical_app.app.state import Mode
-from user_workflows.graphical_app.qa.matrices import backend_to_gui_matrix, sim_hw_matrix
+from user_workflows.graphical_app.qa.matrices import backend_to_gui_matrix, release_freeze_ready, sim_hw_matrix
 
 
 def test_backend_gui_matrix_complete():
@@ -37,7 +37,7 @@ def test_sequence_and_optimization():
     assert timing["steps"] == 2
     c.run_optimization({"iterations": 5, "initial": 1.0})
     assert len(c.optimizer.history()) > 0
-    assert sim_hw_matrix()["plot_export"]["hardware"]
+    assert sim_hw_matrix()["plot_export"]["hardware"]["status"] == "PASS"
 
 
 def test_run_gui_app_bootstrap_path():
@@ -282,3 +282,136 @@ def test_collision_policy_error_blocks_rewrite(tmp_path):
     second = c.save_session_snapshot(run_id="same")
     assert second.success is False
     assert "already exists" in second.message.lower()
+
+
+def test_smoke_mode_switching_connect_and_release_actions():
+    c = AppController()
+    assert c.set_mode("simulation").success
+    assert c.connect_devices().success
+    assert c.release_slm().success
+    assert c.release_camera().success
+    assert c.set_mode("hardware").success
+    assert c.connect_devices().success
+    assert c.release_both().success
+
+
+def test_smoke_pattern_parameter_form_parity():
+    from user_workflows.graphical_app.app.patterns import PatternService
+    from user_workflows.graphical_app.ui.pattern_form import parity_check_for_schema
+
+    service = PatternService()
+    for pattern in service.available_patterns():
+        schema = service.schema_for(pattern)
+        represented = {param["name"] for param in schema["parameters"]}
+        assert parity_check_for_schema(schema, represented) == []
+
+
+def test_smoke_blaze_always_applied():
+    c = AppController()
+    base = c.generate_pattern("single-gaussian", {"kx": 0.01, "ky": 0.0}).payload
+    c.configure_blaze({"enabled": True, "kx": 0.2, "ky": 0.1, "offset": 0.05, "scale": 0.9})
+    simulated = c.simulate_before_apply(base)
+    assert simulated.success
+    assert not (simulated.payload["simulated_phase"] == base).all()
+
+
+def test_smoke_plot_popout_edit_and_export_behavior(tmp_path):
+    from user_workflows.graphical_app.persistence.store import PersistenceStore
+
+    c = AppController()
+    generated = c.generate_pattern("single-gaussian", {"kx": 0.03, "ky": 0.02})
+    c.simulate_before_apply(generated.payload)
+
+    assert c.configure_plot("simulated_phase", {"cmap": "viridis"}).success
+    assert c.zoom_plot("simulated_phase", 1.1).success
+    assert c.pan_plot("simulated_phase", 0.1, 0.1).success
+    assert c.reset_plot("simulated_phase").success
+
+    exported = c.export_plot("simulated_phase", output_dir=str(tmp_path), run_id="smoke")
+    assert exported.success
+    assert Path(exported.payload["image_path"]).exists()
+
+    store = PersistenceStore()
+    model = store.default_layout_model()
+    model["popout_plots"] = [{"plot_name": "simulated_phase", "geometry": "700x560"}]
+    path = tmp_path / "layout.json"
+    store.save_layout_model(path, model)
+    loaded = store.load_layout_model(path)
+    assert loaded["popout_plots"] == model["popout_plots"]
+
+
+def test_smoke_optimization_controls_and_outputs(tmp_path):
+    c = AppController()
+    c.configure_output(folder=str(tmp_path), template="{date}_{session}_{run_id}_{artifact}", collision_policy="increment")
+
+    started = c.start_optimization({"wgs": {"max_iterations": 4, "gain": 0.1}})
+    assert started.success
+    assert started.payload["history"]
+
+    progress = c.optimization_progress()
+    assert progress.success
+    assert "iteration" in progress.payload
+    assert c.pause_optimization().success
+    assert c.resume_optimization().success
+    assert c.stop_optimization().success
+
+    exported = c.export_optimization_history(run_id="smoke-opt")
+    assert exported.success
+    assert Path(exported.payload["csv"]).exists()
+    assert Path(exported.payload["json"]).exists()
+
+
+def test_smoke_calibration_load_and_validate(tmp_path):
+    c = AppController()
+    profile = {
+        "name": "sim-default",
+        "mode": "simulation",
+        "slm_model": "simulatedslm",
+        "camera_model": "simulatedcamera",
+        "matrix": [[1.0, 0.0], [0.0, 1.0]],
+    }
+    path = tmp_path / "profile.json"
+    c.persistence.save_json(path, profile)
+
+    loaded = c.load_calibration_profile(str(path))
+    assert loaded.success
+    validated = c.validate_calibration_profile(loaded.payload)
+    assert validated.success
+    assert validated.payload["compatibility"]["compatible"] is True
+
+
+def test_smoke_layout_persistence(tmp_path):
+    from user_workflows.graphical_app.persistence.store import PersistenceStore
+
+    store = PersistenceStore()
+    model = store.default_layout_model()
+    model["visibility"]["Logs"] = False
+    model["columns"]["left"] = ["Device", "Session"]
+
+    path = tmp_path / "layout.json"
+    store.save_layout_model(path, model)
+    loaded = store.load_layout_model(path)
+    assert loaded["visibility"]["Logs"] is False
+    assert loaded["columns"]["left"] == ["Device", "Session"]
+
+
+def test_sim_hw_matrix_has_explicit_pass_fail_reporting():
+    matrix = sim_hw_matrix()
+    assert matrix
+    for capability, modes in matrix.items():
+        for mode_name, report in modes.items():
+            assert mode_name in {"simulation", "hardware"}
+            assert report["status"] in {"PASS", "FAIL"}
+            assert isinstance(report["supported"], bool)
+            assert report["reason"]
+
+
+def test_release_freeze_requires_matrix_coverage_and_smoke_pass():
+    blocked_for_smoke = release_freeze_ready(smoke_suite_passed=False)
+    assert blocked_for_smoke["coverage_complete"] is True
+    assert blocked_for_smoke["release_freeze_ready"] is False
+
+    ready = release_freeze_ready(smoke_suite_passed=True)
+    assert ready["coverage_complete"] is True
+    assert ready["smoke_suite_passed"] is True
+    assert ready["release_freeze_ready"] is True
