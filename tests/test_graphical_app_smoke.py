@@ -36,3 +36,11 @@ def test_sequence_and_optimization():
     c.run_optimization({"iterations": 5, "initial": 1.0})
     assert len(c.optimizer.history()) > 0
     assert sim_hw_matrix()["plot_export"]["hardware"]
+
+
+def test_run_gui_app_bootstrap_path():
+    import importlib
+
+    module = importlib.import_module("user_workflows.run_gui_app")
+    repo_root = module._ensure_repo_root_on_path()
+    assert str(repo_root) in sys.path

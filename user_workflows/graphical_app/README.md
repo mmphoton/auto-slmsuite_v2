@@ -24,3 +24,7 @@ Run GUI:
 ```bash
 python user_workflows/run_gui_app.py
 ```
+
+
+### Spyder / IDE launch note
+If you run `run_gui_app.py` directly from inside the `user_workflows/` folder, the launcher now bootstraps the repository root onto `sys.path`, so `user_workflows` imports resolve correctly.
