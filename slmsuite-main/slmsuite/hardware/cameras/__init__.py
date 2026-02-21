@@ -17,3 +17,6 @@ be implemented as class functions, any further control of a camera interface can
 accessed by using the given SDK object directly (usually the attribute :attr:`cam` of
 the subclass) or writing additional functions into the subclass.
 """
+
+from .andor_idus import AndorIDus
+
