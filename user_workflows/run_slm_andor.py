@@ -1,4 +1,4 @@
-"""Generate configurable SLM analytical patterns with optional Andor iDus acquisition/feedback."""
+"""Backward-compatible wrapper around the new workflow CLI commands."""
 
 from __future__ import annotations
 
@@ -7,9 +7,10 @@ import pprint
 import time
 import warnings
 from pathlib import Path
+from typing import Any
 
-import numpy as np
-import scipy.io
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from slmsuite.hardware.cameras.andor_idus import AndorIDus
 from slmsuite.hardware.cameraslms import FourierSLM
@@ -72,6 +73,16 @@ def build_pattern(config: WorkflowConfig, slm, deep):
             basis="kxy",
             cameraslm=slm,
         )
+        descriptor = {
+            "type": "gaussian-lattice",
+            "spots": np.asarray(hologram.spot_kxy).T.tolist(),
+            "centers": [
+                [float(args.lattice_center_kx), float(args.lattice_center_ky)],
+            ],
+            "radii": [
+                [float(args.lattice_pitch_x), float(args.lattice_pitch_y)],
+            ],
+        }
     else:
         raise ValueError(f"Unknown pattern '{config.pattern.pattern_type}'")
 
@@ -82,7 +93,49 @@ def build_pattern(config: WorkflowConfig, slm, deep):
         stat_groups=["computational"],
     )
     phi = np.mod(hologram.get_phase(), 2 * np.pi)
-    return _depth_correct(phi, deep)
+    corrected_phase = _depth_correct(phi, deep)
+
+    expected_farfield = None
+    if hasattr(hologram, "extract_farfield"):
+        expected_farfield = np.asarray(hologram.extract_farfield())
+
+    artifacts.update(
+        {
+            "spot_kxy": np.asarray(hologram.spot_kxy),
+            "wrapped_phase": np.asarray(phi),
+        }
+    )
+
+    return PatternResult(
+        phase=corrected_phase,
+        expected_farfield=expected_farfield,
+        target_descriptor=descriptor,
+        artifacts=artifacts,
+    )
+
+
+def _save_pattern_result(pattern_result: PatternResult, output_root: Path, pattern_name: str):
+    """Persist pattern metadata and optional debug arrays under stable filenames."""
+    output_root.mkdir(parents=True, exist_ok=True)
+    np.save(output_root / f"{pattern_name}-phase.npy", pattern_result.phase)
+
+    if pattern_result.expected_farfield is not None:
+        np.save(output_root / f"{pattern_name}-expected-farfield.npy", pattern_result.expected_farfield)
+
+    descriptor = pattern_result.target_descriptor
+    if not {"spots", "centers", "radii"}.issubset(descriptor.keys()):
+        raise ValueError("target_descriptor must include spots/centers/radii entries.")
+    np.savez(
+        output_root / f"{pattern_name}-target-descriptor.npz",
+        spots=np.asarray(descriptor["spots"], dtype=float),
+        centers=np.asarray(descriptor["centers"], dtype=float),
+        radii=np.asarray(descriptor["radii"], dtype=float),
+    )
+
+    for artifact_name, artifact_data in pattern_result.artifacts.items():
+        if artifact_data is None:
+            continue
+        np.save(output_root / f"{pattern_name}-artifact-{artifact_name}.npy", np.asarray(artifact_data))
 
 
 def hold_until_interrupt(slm, cam=None):
@@ -269,7 +322,11 @@ def main():
         out = run_dir / rel
         out.parent.mkdir(parents=True, exist_ok=True)
         np.save(out, frames)
+        output.register_file(out, "legacy_frame_stack")
         print(f"Saved frames to {out.resolve()}")
+
+    output.save_manifest({"calibration_root": str(Path(args.calibration_root).resolve())})
+    print(f"Run directory: {output.run_dir.resolve()}")
 
     hold_until_interrupt(slm, cam=cam)
 

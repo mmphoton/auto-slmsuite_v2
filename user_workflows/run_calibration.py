@@ -1,4 +1,4 @@
-"""Run a full SLM calibration workflow and persist outputs for subsequent scripts."""
+"""Backward-compatible wrapper for `workflow calibrate`."""
 
 from __future__ import annotations
 
@@ -8,22 +8,14 @@ import pprint
 import warnings
 from pathlib import Path
 
-import numpy as np
-import scipy.io
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from user_workflows.config import dump_yaml, load_workflow_config
 from user_workflows.config.schema import WorkflowConfig
 
 
-def _load_fourier_slm(factory_path: str):
-    """Load a `module:function` factory that returns an initialized FourierSLM instance."""
-    if ":" not in factory_path:
-        raise ValueError("--factory must be in 'module:function' format.")
 
-    module_name, function_name = factory_path.split(":", maxsplit=1)
-    module = importlib.import_module(module_name)
-    factory = getattr(module, function_name)
-    return factory()
 
 
 def _load_phase_lut(path: Path, key: str):
@@ -126,6 +118,7 @@ def main():
         config.calibration.paths.get("phase_lut_key", "deep"),
     )
     np.save(calibration_root / "phase-depth-lut.npy", phase_lut)
+    output.save_phase(phase_lut, filename="phase-depth-lut.npy")
 
     fs.slm.phase_lut = phase_lut
 
@@ -133,6 +126,7 @@ def main():
     if config.calibration.force_fourier or not fourier_path.exists():
         fs.fourier_calibrate()
         fs.save_calibration("fourier", path=str(calibration_root), name="fourier-calibration")
+        output.register_file(fourier_path, "calibration")
     else:
         fs.load_calibration("fourier", str(fourier_path))
 
@@ -144,10 +138,12 @@ def main():
         path=str(calibration_root),
         name="wavefront-superpixel-calibration",
     )
+    output.register_file(calibration_root / "wavefront-superpixel-calibration.h5", "calibration")
 
     source_phase = fs.slm.source.get("phase")
     if source_phase is not None:
         np.save(calibration_root / "source-phase-corrected.npy", source_phase)
+        output.save_phase(source_phase, filename="source-phase-corrected.npy")
 
     source_amplitude = fs.slm.source.get("amplitude")
     if source_amplitude is None:
@@ -155,9 +151,18 @@ def main():
             "Wavefront processing did not produce `slm.source['amplitude']`; cannot initialize WGS source amplitude."
         )
     np.save(calibration_root / "source-amplitude-corrected.npy", source_amplitude)
+    output.save_phase(source_amplitude, filename="source-amplitude-corrected.npy")
+
+    output.save_manifest(
+        {
+            "calibration_root": str(calibration_root.resolve()),
+            "force_fourier": bool(args.force_fourier),
+        }
+    )
 
     print("Calibration workflow completed.")
     print(f"Artifacts written under: {calibration_root.resolve()}")
+    print(f"Run manifest written under: {output.run_dir.resolve()}")
 
 
 if __name__ == "__main__":
