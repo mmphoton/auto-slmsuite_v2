@@ -33,6 +33,12 @@ class DeviceManager:
     def __post_init__(self) -> None:
         self.slm = SimulatedSLM()
         self.camera = SimulatedCamera(self.slm)
+        self._sync_camera_settings_snapshot()
+
+    def _sync_camera_settings_snapshot(self) -> None:
+        settings = getattr(self.camera, "_camera_settings", None)
+        if isinstance(settings, dict):
+            self.state.settings_snapshots.camera = dict(settings)
 
     def _ensure_transition(self, action: LifecycleAction) -> None:
         allowed: Dict[str, set[LifecycleAction]] = {
@@ -92,6 +98,7 @@ class DeviceManager:
         else:
             self.slm = HardwareSLM()
             self.camera = HardwareCamera(self.slm)
+        self._sync_camera_settings_snapshot()
         self._lifecycle_stage = "disconnected"
         self._refresh_telemetry()
         return {"mode": mode.value, "safe_stop": safe_stop, "release": release, "telemetry": self.state.camera_telemetry}

@@ -84,3 +84,49 @@ def test_blaze_composition_pipeline_and_snapshot_metadata(tmp_path):
     payload = c.persistence.load_json(snapshot)
     assert payload["blaze"]["enabled"] is True
     assert payload["blaze"]["kx"] == 0.2
+
+
+def test_camera_settings_schema_and_snapshot_metadata(tmp_path):
+    c = AppController()
+    schema_result = c.camera_settings_schema()
+    assert schema_result.success
+    assert "shutter_mode" in schema_result.payload
+
+    settings = {
+        "exposure_ms": 22.5,
+        "gain": 2.0,
+        "roi_x": 4,
+        "roi_y": 6,
+        "roi_width": 96,
+        "roi_height": 88,
+        "binning": 2,
+        "trigger_mode": "software",
+        "shutter_mode": "global",
+        "fps": 18.0,
+        "acquisition_mode": "continuous",
+    }
+    result = c.configure_camera(settings)
+    assert result.success
+    assert result.payload["roi"] == [4, 6, 96, 88]
+    assert c.state.settings_snapshots.camera["shutter_mode"] == "global"
+
+    c.start_run("run-camera-meta", {"purpose": "camera"})
+    assert c.state.active_run is not None
+    assert c.state.active_run.camera_settings["trigger_mode"] == "software"
+
+    snapshot = tmp_path / "session_snapshot.json"
+    c.save_session_snapshot(str(snapshot))
+    payload = c.persistence.load_json(snapshot)
+    assert payload["settings_snapshots"]["camera"]["fps"] == 18.0
+    assert payload["active_run"]["camera_settings"]["shutter_mode"] == "global"
+
+
+def test_camera_temperature_logging_occurs_on_refresh():
+    c = AppController()
+    before = len(c.state.logs)
+    result = c.camera_telemetry()
+    assert result.success
+    assert len(c.state.logs) >= before + 1
+    camera_logs = [entry for entry in c.state.logs if entry.source == "camera"]
+    assert camera_logs
+    assert "Camera temperature update" in camera_logs[-1].message

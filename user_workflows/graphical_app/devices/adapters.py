@@ -54,7 +54,8 @@ class SimulatedCamera(CameraInterface):
             "gain": 1.0,
             "roi": [0, 0, 128, 128],
             "binning": 1,
-            "trigger": "internal",
+            "trigger_mode": "internal",
+            "shutter_mode": "rolling",
             "fps": 30,
             "acquisition_mode": "single",
         }

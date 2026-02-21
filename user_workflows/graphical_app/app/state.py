@@ -76,6 +76,7 @@ class OutputConfig:
 class SettingsSnapshots:
     calibration: Dict[str, Any] = field(default_factory=dict)
     optimizer: Dict[str, Any] = field(default_factory=dict)
+    camera: Dict[str, Any] = field(default_factory=dict)
     plots: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 
@@ -87,6 +88,7 @@ class RunMetadata:
     parameters: Dict[str, Any]
     calibration_profile: Optional[str] = None
     optimizer: Dict[str, Any] = field(default_factory=dict)
+    camera_settings: Dict[str, Any] = field(default_factory=dict)
     telemetry: Dict[str, Any] = field(default_factory=dict)
     blaze: Dict[str, Any] = field(default_factory=dict)
 
