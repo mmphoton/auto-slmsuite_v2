@@ -57,3 +57,32 @@ Example (no camera, hold pattern indefinitely):
 ```bash
 python user_workflows/run_slm_andor.py
 ```
+
+
+### Pattern options in `run_slm_andor.py`
+You can select from four analytical pattern families using `--pattern`:
+
+- `single-gaussian` (single focused Gaussian-like spot)
+- `double-gaussian` (two Gaussian-like spots separated by `--double-sep-kxy`)
+- `gaussian-lattice` (rectangular lattice of Gaussian-like spots)
+- `laguerre-gaussian` (LG phase mode with `--lg-l`, `--lg-p`)
+
+Examples:
+
+```bash
+# Single Gaussian-like spot
+python user_workflows/run_slm_andor.py --pattern single-gaussian --single-kx 0.00 --single-ky 0.01
+
+# Two spots separated in k-space
+python user_workflows/run_slm_andor.py --pattern double-gaussian --double-sep-kxy 0.03
+
+# 8x6 lattice
+python user_workflows/run_slm_andor.py --pattern gaussian-lattice --lattice-nx 8 --lattice-ny 6 --lattice-pitch-x 0.012 --lattice-pitch-y 0.012
+
+# Laguerre-Gaussian, l=2, p=1
+python user_workflows/run_slm_andor.py --pattern laguerre-gaussian --lg-l 2 --lg-p 1
+```
+
+Useful optimization knobs for spot-based patterns:
+- `--holo-method` (default `WGS-Kim`)
+- `--holo-maxiter` (default `30`)
