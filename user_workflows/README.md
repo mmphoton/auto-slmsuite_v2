@@ -1,88 +1,97 @@
-# User workflow files and calibration persistence
+# User workflow CLI and calibration persistence
+
+## Centralized run naming/output API
+All workflow scripts now accept shared output naming controls:
+
+- `--run-name`
+- `--output-root`
+- `--name-template`
+- `--overwrite` / `--resume`
+
+The naming template supports fields like:
+`{date}_{run_name}_{pattern}_{camera}_{iter}`
+
+Collisions auto-increment by default (`_001`, `_002`, ...).
 
 ## Calibration producer
-Run `run_calibration.py` first to generate the calibration artifacts consumed by all other run scripts.
-
-Example:
+Run `run_calibration.py` first to generate calibration artifacts consumed by camera workflows.
 
 ```bash
 python user_workflows/run_calibration.py \
   --factory my_lab.bootstrap:create_fourier_slm \
-  --phase-lut /path/to/deep_1024.mat
+  --phase-lut /path/to/deep_1024.mat \
+  --run-name cal_session_a \
+  --name-template "{date}_{run_name}_{pattern}_{camera}_{iter}" \
+  --output-root user_workflows/output
 ```
 
 ## Persistent file layout
-By default all outputs are written to:
+Calibration files for downstream consumers are still written under `--calibration-root` (default `user_workflows/calibrations`):
 
-- `user_workflows/calibrations/phase-depth-lut.npy` — validated phase-depth LUT used for phase correction.
-- `user_workflows/calibrations/fourier-calibration.h5` — output of `FourierSLM.fourier_calibrate(...)` (or loaded equivalent).
-- `user_workflows/calibrations/wavefront-superpixel-calibration.h5` — output of `wavefront_calibrate_superpixel(...)`.
-- `user_workflows/calibrations/source-phase-corrected.npy` — processed source phase map (if available).
-- `user_workflows/calibrations/source-amplitude-corrected.npy` — processed source amplitude for WGS initialization.
+- `phase-depth-lut.npy`
+- `fourier-calibration.h5`
+- `wavefront-superpixel-calibration.h5`
+- `source-phase-corrected.npy` (if available)
+- `source-amplitude-corrected.npy`
+
+Additionally, each run creates a run directory containing a manifest and produced run artifacts.
+
+Example run tree:
+
+```text
+user_workflows/output/
+└── 20260221_cal_session_a_calibration_none_000/
+    ├── manifest.json
+    ├── metrics.json
+    ├── phase-depth-lut.npy
+    └── source-amplitude-corrected.npy
+```
 
 ## Consumer scripts
-Consumer scripts must validate these files before execution and fail with explicit instructions if missing.
-
-- `test_working.py` now enforces this precondition via `user_workflows/calibration_io.py` and prints an actionable error telling you to run `python user_workflows/run_calibration.py`.
-
-When adding future `run_*.py` scripts, import and call:
+Consumer scripts should validate calibration files before hardware operations:
 
 ```python
 from user_workflows.calibration_io import assert_required_calibration_files
 assert_required_calibration_files("user_workflows/calibrations")
 ```
 
-before interacting with hardware.
-
-
 ## Andor image acquisition + feedback workflow
 Use `run_slm_andor.py` to:
-- keep the Andor CCD cooled to `-65C` while connected,
-- set shutter control to `auto`,
-- acquire full camera images of displayed SLM patterns,
-- optionally run camera-driven experimental feedback optimization.
+- display configurable SLM analytical patterns,
+- optionally acquire Andor full-frame images,
+- optionally run experimental feedback optimization,
+- save all run artifacts (`phase`, `frames`, `metrics`, `plots`, `manifest`) via `OutputManager`.
 
-Example (with camera + feedback):
+Example (camera + feedback + custom naming):
 
 ```bash
 python user_workflows/run_slm_andor.py \
   --use-camera \
   --feedback \
   --feedback-iters 15 \
-  --save-frames user_workflows/output/andor_frames.npy
+  --run-name lg_feedback \
+  --output-root user_workflows/output \
+  --name-template "{date}_{run_name}_{pattern}_{camera}_{iter}"
 ```
 
-Example (no camera, hold pattern indefinitely):
+Resulting run tree (example):
 
-```bash
-python user_workflows/run_slm_andor.py
+```text
+user_workflows/output/
+└── 20260221_lg_feedback_laguerre-gaussian_andor_000/
+    ├── manifest.json
+    ├── metrics.json
+    ├── phase.npy
+    ├── frames/
+    │   ├── frame_000.npy
+    │   └── frame_001.npy
+    └── plots/
+        └── first_frame.png
 ```
-
 
 ### Pattern options in `run_slm_andor.py`
-You can select from four analytical pattern families using `--pattern`:
-
-- `single-gaussian` (single focused Gaussian-like spot)
-- `double-gaussian` (two Gaussian-like spots separated by `--double-sep-kxy`)
-- `gaussian-lattice` (rectangular lattice of Gaussian-like spots)
-- `laguerre-gaussian` (LG phase mode with `--lg-l`, `--lg-p`)
-
-Examples:
-
-```bash
-# Single Gaussian-like spot
-python user_workflows/run_slm_andor.py --pattern single-gaussian --single-kx 0.00 --single-ky 0.01
-
-# Two spots separated in k-space
-python user_workflows/run_slm_andor.py --pattern double-gaussian --double-sep-kxy 0.03
-
-# 8x6 lattice
-python user_workflows/run_slm_andor.py --pattern gaussian-lattice --lattice-nx 8 --lattice-ny 6 --lattice-pitch-x 0.012 --lattice-pitch-y 0.012
-
-# Laguerre-Gaussian, l=2, p=1
-python user_workflows/run_slm_andor.py --pattern laguerre-gaussian --lg-l 2 --lg-p 1
-```
-
-Useful optimization knobs for spot-based patterns:
-- `--holo-method` (default `WGS-Kim`)
-- `--holo-maxiter` (default `30`)
+Select from `--pattern`:
+- `single-gaussian`
+- `double-gaussian`
+- `gaussian-lattice`
+- `laguerre-gaussian`
