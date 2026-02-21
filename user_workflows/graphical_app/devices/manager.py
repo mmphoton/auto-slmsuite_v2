@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from user_workflows.graphical_app.app.state import AppState, Mode
+from user_workflows.graphical_app.app.state import AppState, DeviceConnectionState, Mode
 from user_workflows.graphical_app.devices.adapters import HardwareCamera, HardwareSLM, SimulatedCamera, SimulatedSLM
 
 
@@ -41,7 +41,8 @@ class DeviceManager:
     def connect(self) -> None:
         self.slm.connect()
         self.camera.connect()
-        self.state.device_status.update({"slm": DeviceState.CONNECTED.value, "camera": DeviceState.CONNECTED.value})
+        self.state.set_device_state("slm", DeviceConnectionState.CONNECTED)
+        self.state.set_device_state("camera", DeviceConnectionState.CONNECTED)
 
     def reconnect(self) -> None:
         self.release_both()
@@ -49,11 +50,11 @@ class DeviceManager:
 
     def release_slm(self) -> None:
         self.slm.disconnect()
-        self.state.device_status["slm"] = DeviceState.DISCONNECTED.value
+        self.state.set_device_state("slm", DeviceConnectionState.DISCONNECTED)
 
     def release_camera(self) -> None:
         self.camera.disconnect()
-        self.state.device_status["camera"] = DeviceState.DISCONNECTED.value
+        self.state.set_device_state("camera", DeviceConnectionState.DISCONNECTED)
 
     def release_both(self) -> None:
         self.release_slm()
@@ -62,10 +63,10 @@ class DeviceManager:
     def keep_both_active(self) -> None:
         if self.state.device_status["slm"] != DeviceState.CONNECTED.value:
             self.slm.connect()
-            self.state.device_status["slm"] = DeviceState.CONNECTED.value
+            self.state.set_device_state("slm", DeviceConnectionState.CONNECTED)
         if self.state.device_status["camera"] != DeviceState.CONNECTED.value:
             self.camera.connect()
-            self.state.device_status["camera"] = DeviceState.CONNECTED.value
+            self.state.set_device_state("camera", DeviceConnectionState.CONNECTED)
 
     def safe_stop(self) -> None:
         if self.state.active_run is not None:
