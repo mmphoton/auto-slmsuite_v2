@@ -1,9 +1,15 @@
-# User workflow files and calibration persistence
+# User workflows: calibration, pattern generation, and migration guide
+
+This directory contains the operator-facing workflows for:
+
+- generating/persisting calibration artifacts,
+- displaying analytical or holographically-optimized SLM patterns,
+- optional Andor image acquisition and experimental feedback.
+
+---
 
 ## Calibration producer
-Run `run_calibration.py` first to generate the calibration artifacts consumed by all other run scripts.
-
-Example:
+Run `run_calibration.py` first to generate the calibration artifacts consumed by downstream workflows.
 
 ```bash
 python user_workflows/run_calibration.py \
@@ -11,32 +17,167 @@ python user_workflows/run_calibration.py \
   --phase-lut /path/to/deep_1024.mat
 ```
 
-## Persistent file layout
-By default all outputs are written to:
+### Persistent file layout
+By default all outputs are written to `user_workflows/calibrations/`:
 
-- `user_workflows/calibrations/phase-depth-lut.npy` — validated phase-depth LUT used for phase correction.
-- `user_workflows/calibrations/fourier-calibration.h5` — output of `FourierSLM.fourier_calibrate(...)` (or loaded equivalent).
-- `user_workflows/calibrations/wavefront-superpixel-calibration.h5` — output of `wavefront_calibrate_superpixel(...)`.
-- `user_workflows/calibrations/source-phase-corrected.npy` — processed source phase map (if available).
-- `user_workflows/calibrations/source-amplitude-corrected.npy` — processed source amplitude for WGS initialization.
+- `phase-depth-lut.npy` — validated phase-depth LUT used for phase correction.
+- `fourier-calibration.h5` — output of `FourierSLM.fourier_calibrate(...)` (or loaded equivalent).
+- `wavefront-superpixel-calibration.h5` — output of `wavefront_calibrate_superpixel(...)`.
+- `source-phase-corrected.npy` — processed source phase map (if available).
+- `source-amplitude-corrected.npy` — processed source amplitude for WGS initialization.
 
-## Consumer scripts
-Consumer scripts must validate these files before execution and fail with explicit instructions if missing.
-
-- `test_working.py` now enforces this precondition via `user_workflows/calibration_io.py` and prints an actionable error telling you to run `python user_workflows/run_calibration.py`.
-
-When adding future `run_*.py` scripts, import and call:
+Consumer workflows should validate these files before execution and fail with actionable instructions if missing.
 
 ```python
 from user_workflows.calibration_io import assert_required_calibration_files
+
 assert_required_calibration_files("user_workflows/calibrations")
 ```
 
-before interacting with hardware.
+---
 
+## Workflow architecture (script vs pattern modules vs registry)
+The pattern system is organized into three conceptual layers:
+
+```text
+run_slm_andor.py (workflow script)
+    |
+    |-- parses operator inputs / config
+    |-- initializes hardware (SLM, optional camera)
+    |-- loads calibration state
+    v
+Pattern registry (name -> pattern builder)
+    |
+    |-- validates pattern key
+    |-- dispatches to selected pattern module(s)
+    v
+Pattern modules (single responsibility)
+    |
+    |-- single_gaussian
+    |-- double_gaussian
+    |-- gaussian_lattice
+    |-- laguerre_gaussian
+    |-- composite (ordered composition of modules)
+    v
+Final phase map -> depth correction -> set on SLM
+```
+
+Use this architecture to keep hardware orchestration in the workflow script and keep optical math in isolated pattern modules.
+
+---
+
+## Pattern examples (4 built-in patterns + composite mode)
+
+### 1) Single Gaussian-like spot
+```bash
+python user_workflows/run_slm_andor.py \
+  --pattern single-gaussian \
+  --single-kx 0.00 \
+  --single-ky 0.01
+```
+
+### 2) Double Gaussian-like spots
+```bash
+python user_workflows/run_slm_andor.py \
+  --pattern double-gaussian \
+  --double-center-kx 0.00 \
+  --double-center-ky 0.00 \
+  --double-sep-kxy 0.03
+```
+
+### 3) Gaussian lattice
+```bash
+python user_workflows/run_slm_andor.py \
+  --pattern gaussian-lattice \
+  --lattice-nx 8 \
+  --lattice-ny 6 \
+  --lattice-pitch-x 0.012 \
+  --lattice-pitch-y 0.012
+```
+
+### 4) Laguerre-Gaussian
+```bash
+python user_workflows/run_slm_andor.py \
+  --pattern laguerre-gaussian \
+  --lg-l 2 \
+  --lg-p 1
+```
+
+### 5) Composite mode (schema/config example)
+Composite mode lets you stack multiple pattern modules in order (for example: LG phase + blaze + sparse spots). Example YAML-style config:
+
+```yaml
+pattern:
+  mode: composite
+  components:
+    - type: laguerre_gaussian
+      l: 2
+      p: 1
+    - type: single_gaussian
+      kx: 0.00
+      ky: 0.01
+  combine: phase_add_mod_2pi
+hologram:
+  method: WGS-Kim
+  maxiter: 30
+```
+
+---
+
+## Add a new pattern in 3 steps
+1. **Create the pattern module**
+   - Add a module with a pure function that accepts validated parameters and returns phase (or target spot vectors).
+   - Keep hardware access out of the module.
+
+2. **Register the module**
+   - Add an entry in the pattern registry (`pattern_name -> builder callable + schema metadata`).
+   - Define default parameters and required keys.
+
+3. **Expose/configure and test**
+   - Wire the new pattern key into workflow configuration parsing.
+   - Add one CLI/config example and a quick smoke check in local validation.
+
+---
+
+## CLI migration: old flags -> new schema/config fields
+Use this table when migrating scripts from direct CLI arguments to declarative config.
+
+| Old CLI flag | New config field |
+|---|---|
+| `--pattern` | `pattern.type` (or `pattern.mode` for composite) |
+| `--single-kx` | `pattern.params.single_gaussian.kx` |
+| `--single-ky` | `pattern.params.single_gaussian.ky` |
+| `--double-center-kx` | `pattern.params.double_gaussian.center_kx` |
+| `--double-center-ky` | `pattern.params.double_gaussian.center_ky` |
+| `--double-sep-kxy` | `pattern.params.double_gaussian.sep_kxy` |
+| `--lattice-nx` | `pattern.params.gaussian_lattice.nx` |
+| `--lattice-ny` | `pattern.params.gaussian_lattice.ny` |
+| `--lattice-pitch-x` | `pattern.params.gaussian_lattice.pitch_x` |
+| `--lattice-pitch-y` | `pattern.params.gaussian_lattice.pitch_y` |
+| `--lattice-center-kx` | `pattern.params.gaussian_lattice.center_kx` |
+| `--lattice-center-ky` | `pattern.params.gaussian_lattice.center_ky` |
+| `--lg-l` | `pattern.params.laguerre_gaussian.l` |
+| `--lg-p` | `pattern.params.laguerre_gaussian.p` |
+| `--blaze-kx` | `pattern.params.common.blaze_kx` |
+| `--blaze-ky` | `pattern.params.common.blaze_ky` |
+| `--holo-method` | `hologram.method` |
+| `--holo-maxiter` | `hologram.maxiter` |
+| `--use-camera` | `camera.enabled` |
+| `--camera-serial` | `camera.serial` |
+| `--exposure-s` | `camera.exposure_s` |
+| `--frames` | `acquisition.frames` |
+| `--feedback` | `feedback.enabled` |
+| `--feedback-iters` | `feedback.iterations` |
+| `--calibration-root` | `calibration.root` |
+| `--save-frames` | `outputs.save_frames_npy` |
+| `--lut-file` | `phase_lut.file` |
+| `--lut-key` | `phase_lut.key` |
+
+---
 
 ## Andor image acquisition + feedback workflow
 Use `run_slm_andor.py` to:
+
 - keep the Andor CCD cooled to `-65C` while connected,
 - set shutter control to `auto`,
 - acquire full camera images of displayed SLM patterns,
@@ -58,31 +199,26 @@ Example (no camera, hold pattern indefinitely):
 python user_workflows/run_slm_andor.py
 ```
 
-
-### Pattern options in `run_slm_andor.py`
-You can select from four analytical pattern families using `--pattern`:
-
-- `single-gaussian` (single focused Gaussian-like spot)
-- `double-gaussian` (two Gaussian-like spots separated by `--double-sep-kxy`)
-- `gaussian-lattice` (rectangular lattice of Gaussian-like spots)
-- `laguerre-gaussian` (LG phase mode with `--lg-l`, `--lg-p`)
-
-Examples:
-
-```bash
-# Single Gaussian-like spot
-python user_workflows/run_slm_andor.py --pattern single-gaussian --single-kx 0.00 --single-ky 0.01
-
-# Two spots separated in k-space
-python user_workflows/run_slm_andor.py --pattern double-gaussian --double-sep-kxy 0.03
-
-# 8x6 lattice
-python user_workflows/run_slm_andor.py --pattern gaussian-lattice --lattice-nx 8 --lattice-ny 6 --lattice-pitch-x 0.012 --lattice-pitch-y 0.012
-
-# Laguerre-Gaussian, l=2, p=1
-python user_workflows/run_slm_andor.py --pattern laguerre-gaussian --lg-l 2 --lg-p 1
-```
-
 Useful optimization knobs for spot-based patterns:
+
 - `--holo-method` (default `WGS-Kim`)
 - `--holo-maxiter` (default `30`)
+
+---
+
+## Developer quickstart (contributors)
+For contributors making workflow or pattern changes:
+
+1. **Set up and inspect**
+   ```bash
+   python -m pip install -e .
+   python user_workflows/run_slm_andor.py --help
+   ```
+2. **Validate calibration preconditions**
+   - Ensure `user_workflows/calibrations/` contains required artifacts, or run calibration first.
+3. **Smoke-test a non-camera path**
+   - Start with a simple pattern config/CLI using `--pattern single-gaussian`.
+4. **Then test camera/feedback path on hardware**
+   - Enable `--use-camera`, then optionally `--feedback`.
+5. **Document every new pattern**
+   - Add one minimal usage example and one migration-row entry in this README.
