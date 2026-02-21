@@ -1,3 +1,4 @@
+from pathlib import Path
 import numpy as np
 import scipy.io
 from slmsuite.hardware.slms.holoeye import Holoeye
@@ -15,6 +16,12 @@ from user_workflows.patterns.utils import add_blaze_and_wrap, apply_depth_correc
 
 CALIBRATION_ROOT = "user_workflows/calibrations"
 calibration_paths = assert_required_calibration_files(CALIBRATION_ROOT)
+output = OutputManager(
+    RunNamingConfig(run_name="test_working", output_root=Path("user_workflows/output")),
+    pattern="diagnostic",
+    camera="none",
+    metadata={"workflow": "test_working"},
+)
 FOURIER_CALIBRATION_FILE = calibration_paths["fourier"]
 WAVEFRONT_CALIBRATION_FILE = calibration_paths["wavefront_superpixel"]
 SOURCE_AMPLITUDE_CORRECTED = np.load(calibration_paths["source_amplitude"])
@@ -65,6 +72,7 @@ phi_wrapped = add_blaze_and_wrap(base_phase=phi, grid=slm, blaze_vector=blaze_ve
 corrected_phase = apply_depth_correction(phi_wrapped, deep)
 
 hologram = corrected_phase
+output.save_phase(hologram)
 # hologram.optimize('WGS-Kim',feedback='computational_spot',stat_groups=['computational_spot'], maxiter=30)
 
 
