@@ -1,21 +1,13 @@
-"""Pattern parameter schemas and parsing helpers."""
+"""Pattern package for SLM analytical generators."""
 
-from .schemas import (
-    DoubleGaussianParams,
-    GaussianLatticeParams,
-    LaguerreGaussianParams,
-    PatternValidationError,
-    SingleGaussianParams,
-    pattern_field_descriptions,
-    pattern_params_from_flat_dict,
+from user_workflows.patterns.base import BasePattern, PatternResult, get_pattern
+
+# Import modules for side-effect registration.
+from user_workflows.patterns import (  # noqa: F401
+    double_gaussian,
+    gaussian_lattice,
+    laguerre_gaussian,
+    single_gaussian,
 )
 
-__all__ = [
-    "SingleGaussianParams",
-    "DoubleGaussianParams",
-    "GaussianLatticeParams",
-    "LaguerreGaussianParams",
-    "PatternValidationError",
-    "pattern_params_from_flat_dict",
-    "pattern_field_descriptions",
-]
+__all__ = ["BasePattern", "PatternResult", "get_pattern"]
