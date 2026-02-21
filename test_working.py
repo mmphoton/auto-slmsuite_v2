@@ -1,7 +1,7 @@
+from pathlib import Path
 import numpy as np
 import scipy.io
 from slmsuite.hardware.slms.holoeye import Holoeye
-from slmsuite.holography.toolbox.phase import blaze
 from slmsuite.holography import toolbox
 from slmsuite.holography.toolbox import phase
 from slmsuite.holography.algorithms import Hologram
@@ -12,9 +12,16 @@ from slmsuite.holography.algorithms import SpotHologram
 import time
 
 from user_workflows.calibration_io import assert_required_calibration_files
+from user_workflows.patterns.utils import add_blaze_and_wrap, apply_depth_correction
 
 CALIBRATION_ROOT = "user_workflows/calibrations"
 calibration_paths = assert_required_calibration_files(CALIBRATION_ROOT)
+output = OutputManager(
+    RunNamingConfig(run_name="test_working", output_root=Path("user_workflows/output")),
+    pattern="diagnostic",
+    camera="none",
+    metadata={"workflow": "test_working"},
+)
 FOURIER_CALIBRATION_FILE = calibration_paths["fourier"]
 WAVEFRONT_CALIBRATION_FILE = calibration_paths["wavefront_superpixel"]
 SOURCE_AMPLITUDE_CORRECTED = np.load(calibration_paths["source_amplitude"])
@@ -41,7 +48,6 @@ mat = scipy.io.loadmat(lut_file)
 if 'deep' not in mat:
     raise ValueError("LUT file must contain variable 'deep'")
 deep = mat['deep'].squeeze()  # flatten to 1D
-nLUT = deep.shape[0]
 # === INITIALIZE SLM ===
 slm = Holoeye(preselect="index:0")  # change index if needed
 ny, nx = slm.shape
@@ -51,11 +57,6 @@ x = np.linspace(-nx/2, nx/2, nx)
 y = np.linspace(-ny/2, ny/2, ny)
 X, Y = np.meshgrid(x, y)
 
-target_amp = np.exp(-(X**2 + Y**2)/(2.0*sigma**2))
-indices = np.clip(np.rint(target_amp*(nLUT-1)), 0, nLUT-1).astype(int)
-# LUT value for each pixel
-F = deep[indices]
-
 #### Lg30 phase
 lg30_phase = phase.laguerre_gaussian(slm, l=3,p=0)
 
@@ -64,20 +65,14 @@ lg30_phase = phase.laguerre_gaussian(slm, l=3,p=0)
 phi = np.zeros((ny, nx))
 phi += lg30_phase
 
-# # add blaze ramp
-blaze_phase = blaze(grid=slm, vector=blaze_vector)
-# phi += blaze_phase
-phi += blaze_phase
-
-# wrap to 0..2pi
-phi_wrapped = np.mod(phi, 2*np.pi)
+# add blaze ramp + wrap to 0..2pi
+phi_wrapped = add_blaze_and_wrap(base_phase=phi, grid=slm, blaze_vector=blaze_vector)
 
 # === APPLY DEPTH CORRECTION ===
-corrected = (phi_wrapped - np.pi) * F + np.pi
-# wrap again
-corrected_phase = np.mod(corrected, 2*np.pi)
+corrected_phase = apply_depth_correction(phi_wrapped, deep)
 
 hologram = corrected_phase
+output.save_phase(hologram)
 # hologram.optimize('WGS-Kim',feedback='computational_spot',stat_groups=['computational_spot'], maxiter=30)
 
 

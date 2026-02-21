@@ -1,24 +1,29 @@
-"""Generate configurable SLM analytical patterns with optional Andor iDus acquisition/feedback."""
+"""Backward-compatible wrapper around the new workflow CLI commands."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-import scipy.io
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from slmsuite.hardware.cameras.andor_idus import AndorIDus
 from slmsuite.hardware.cameraslms import FourierSLM
 from slmsuite.hardware.slms.holoeye import Holoeye
 from slmsuite.holography.algorithms import FeedbackHologram, SpotHologram
-from slmsuite.holography.toolbox.phase import blaze
 from slmsuite.holography.toolbox import phase
 
 from user_workflows.calibration_io import assert_required_calibration_files
+from user_workflows.patterns.utils import (
+    add_blaze_and_wrap,
+    apply_depth_correction,
+    build_spot_solve_settings,
+)
 
 
 @dataclass
@@ -132,12 +137,8 @@ def build_pattern(args, slm, deep) -> PatternResult:
     else:
         raise ValueError(f"Unknown pattern '{args.pattern}'")
 
-    hologram.optimize(
-        method=args.holo_method,
-        maxiter=args.holo_maxiter,
-        feedback="computational",
-        stat_groups=["computational"],
-    )
+    solve_settings = build_spot_solve_settings(method=args.holo_method, maxiter=args.holo_maxiter)
+    hologram.optimize(**solve_settings)
     phi = np.mod(hologram.get_phase(), 2 * np.pi)
     corrected_phase = _depth_correct(phi, deep)
 
@@ -216,12 +217,44 @@ def run_feedback(fs: FourierSLM, iterations: int):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--pattern",
+        default=None,
+        choices=["single-gaussian", "double-gaussian", "gaussian-lattice", "laguerre-gaussian"],
+        help="Pattern family to generate on SLM",
+    )
+    parser.add_argument(
+        "--pattern-config",
+        default="",
+        help="Optional JSON config with {'pattern': <name>, 'params': {..}}",
+    )
+
+    parser.add_argument("--lut-file", default="deep_1024.mat")
+    parser.add_argument("--lut-key", default="deep")
+    parser.add_argument("--blaze-kx", type=float, default=0.0)
+    parser.add_argument("--blaze-ky", type=float, default=0.0045)
+
+    parser.add_argument("--lg-l", type=int, default=3)
+    parser.add_argument("--lg-p", type=int, default=0)
+    parser.add_argument("--single-kx", type=float, default=0.0)
+    parser.add_argument("--single-ky", type=float, default=0.0)
+    parser.add_argument("--double-center-kx", type=float, default=0.0)
+    parser.add_argument("--double-center-ky", type=float, default=0.0)
+    parser.add_argument("--double-sep-kxy", type=float, default=0.02, help="Separation in kxy units")
+    parser.add_argument("--lattice-nx", type=int, default=5)
+    parser.add_argument("--lattice-ny", type=int, default=5)
+    parser.add_argument("--lattice-pitch-x", type=float, default=0.01)
+    parser.add_argument("--lattice-pitch-y", type=float, default=0.01)
+    parser.add_argument("--lattice-center-kx", type=float, default=0.0)
+    parser.add_argument("--lattice-center-ky", type=float, default=0.0)
+    parser.add_argument("--holo-method", default="WGS-Kim")
+    parser.add_argument("--holo-maxiter", type=int, default=30)
 
     # Pattern selection + easy parameter knobs.
     parser.add_argument(
         "--pattern",
         default="laguerre-gaussian",
-        choices=["single-gaussian", "double-gaussian", "gaussian-lattice", "laguerre-gaussian"],
+        choices=list_patterns(),
         help="Pattern family to generate on SLM",
     )
 
@@ -231,25 +264,29 @@ def main():
     parser.add_argument("--blaze-ky", type=float, default=0.0045)
 
     # LG params
-    parser.add_argument("--lg-l", type=int, default=3)
-    parser.add_argument("--lg-p", type=int, default=0)
+    lg_help = pattern_field_descriptions("laguerre-gaussian")
+    parser.add_argument("--lg-l", type=int, default=3, help=lg_help["l"])
+    parser.add_argument("--lg-p", type=int, default=0, help=lg_help["p"])
 
     # Single gaussian spot params.
-    parser.add_argument("--single-kx", type=float, default=0.0)
-    parser.add_argument("--single-ky", type=float, default=0.0)
+    single_help = pattern_field_descriptions("single-gaussian")
+    parser.add_argument("--single-kx", type=float, default=0.0, help=single_help["kx"])
+    parser.add_argument("--single-ky", type=float, default=0.0, help=single_help["ky"])
 
     # Two gaussian spot params.
-    parser.add_argument("--double-center-kx", type=float, default=0.0)
-    parser.add_argument("--double-center-ky", type=float, default=0.0)
-    parser.add_argument("--double-sep-kxy", type=float, default=0.02, help="Separation in kxy units")
+    double_help = pattern_field_descriptions("double-gaussian")
+    parser.add_argument("--double-center-kx", type=float, default=0.0, help=double_help["center_kx"])
+    parser.add_argument("--double-center-ky", type=float, default=0.0, help=double_help["center_ky"])
+    parser.add_argument("--double-sep-kxy", type=float, default=0.02, help=double_help["sep_kxy"])
 
     # Lattice params.
-    parser.add_argument("--lattice-nx", type=int, default=5)
-    parser.add_argument("--lattice-ny", type=int, default=5)
-    parser.add_argument("--lattice-pitch-x", type=float, default=0.01)
-    parser.add_argument("--lattice-pitch-y", type=float, default=0.01)
-    parser.add_argument("--lattice-center-kx", type=float, default=0.0)
-    parser.add_argument("--lattice-center-ky", type=float, default=0.0)
+    lattice_help = pattern_field_descriptions("gaussian-lattice")
+    parser.add_argument("--lattice-nx", type=int, default=5, help=lattice_help["nx"])
+    parser.add_argument("--lattice-ny", type=int, default=5, help=lattice_help["ny"])
+    parser.add_argument("--lattice-pitch-x", type=float, default=0.01, help=lattice_help["pitch_x"])
+    parser.add_argument("--lattice-pitch-y", type=float, default=0.01, help=lattice_help["pitch_y"])
+    parser.add_argument("--lattice-center-kx", type=float, default=0.0, help=lattice_help["center_kx"])
+    parser.add_argument("--lattice-center-ky", type=float, default=0.0, help=lattice_help["center_ky"])
 
     # Hologram optimization knobs.
     parser.add_argument("--holo-method", default="WGS-Kim")
@@ -257,9 +294,6 @@ def main():
 
     # Camera/feedback knobs.
     parser.add_argument("--use-camera", action="store_true", help="Enable Andor full-frame acquisition")
-    parser.add_argument("--camera-serial", default="")
-    parser.add_argument("--exposure-s", type=float, default=0.03)
-    parser.add_argument("--frames", type=int, default=1, help="Number of full frames to acquire")
     parser.add_argument("--feedback", action="store_true", help="Run experimental feedback optimization")
     parser.add_argument("--feedback-iters", type=int, default=10)
     parser.add_argument("--calibration-root", default="user_workflows/calibrations")
@@ -284,6 +318,9 @@ def main():
         print(f"Saved pattern artifacts to {save_root.resolve()}")
 
     if not args.use_camera:
+        output.save_metrics({"mode": "slm_only", "pattern": args.pattern})
+        output.save_manifest()
+        print(f"Run directory: {output.run_dir.resolve()}")
         hold_until_interrupt(slm)
         return
 
@@ -302,18 +339,37 @@ def main():
     fs.load_calibration("wavefront_superpixel", str(calibration_paths["wavefront_superpixel"]))
     fs.slm.source["amplitude"] = np.load(calibration_paths["source_amplitude"])
 
+    feedback_metrics = {}
     if args.feedback:
-        run_feedback(fs, iterations=args.feedback_iters)
+        feedback_metrics = run_feedback(fs, iterations=args.feedback_iters)
 
     frames = [cam.get_image() for _ in range(max(1, args.frames))]
     frames = np.asarray(frames)
     print(f"Acquired {frames.shape[0]} Andor full-frame image(s): shape={frames.shape[1:]}")
 
+    for i, frame in enumerate(frames):
+        output.save_frame(frame, index=i)
+    output.save_plot(frames[0], filename="first_frame.png")
+
+    metrics = {
+        "mode": "camera",
+        "frames": int(frames.shape[0]),
+        "frame_shape": list(frames.shape[1:]),
+        "exposure_s": float(args.exposure_s),
+        "feedback": bool(args.feedback),
+        **feedback_metrics,
+    }
+    output.save_metrics(metrics)
+
     if args.save_frames:
         out = Path(args.save_frames)
         out.parent.mkdir(parents=True, exist_ok=True)
         np.save(out, frames)
+        output.register_file(out, "legacy_frame_stack")
         print(f"Saved frames to {out.resolve()}")
+
+    output.save_manifest({"calibration_root": str(Path(args.calibration_root).resolve())})
+    print(f"Run directory: {output.run_dir.resolve()}")
 
     hold_until_interrupt(slm, cam=cam)
 
