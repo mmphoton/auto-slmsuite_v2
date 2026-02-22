@@ -910,10 +910,19 @@ class MainWindow(tk.Tk):
                     continue
                 page_key = self.PANEL_TO_PAGE[panel_name]
                 panel = self.panel_frames[panel_name]
+                home = self.panel_home_columns.get(panel_name, col_name)
+                if col_name != home:
+                    continue
+                expected_parent = str(self.page_columns[page_key][home])
+                if str(panel.master) != expected_parent:
+                    self.status_var.set(
+                        f"Skipping panel '{panel_name}' due to parent mismatch in saved layout; using safe defaults."
+                    )
+                    continue
                 if panel_name == "Plots":
-                    panel.pack(in_=self.page_columns[page_key][col_name], fill=tk.BOTH, expand=True, padx=6, pady=6)
+                    panel.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
                 else:
-                    panel.pack(in_=self.page_columns[page_key][col_name], fill=tk.X, padx=6, pady=6)
+                    panel.pack(fill=tk.X, padx=6, pady=6)
 
     def _capture_layout_model(self) -> dict:
         popouts = []
@@ -972,7 +981,11 @@ class MainWindow(tk.Tk):
 
     def restore_layout(self) -> None:
         model = self.store.load_layout_model(self.layout_path)
-        self._apply_layout_model(model)
+        try:
+            self._apply_layout_model(model)
+        except tk.TclError as exc:
+            self.status_var.set(f"Layout restore failed; resetting to safe defaults ({exc}).")
+            self._apply_layout_model(self.store.default_layout_model())
 
     def _reset_layout(self) -> None:
         self._apply_layout_model(self.store.default_layout_model())
