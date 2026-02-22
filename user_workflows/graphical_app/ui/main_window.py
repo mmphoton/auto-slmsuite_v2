@@ -110,13 +110,37 @@ class PlotWidget(ttk.Frame):
             rgb = np.stack([rgb, rgb, rgb], axis=-1)
         h, w = rgb.shape[:2]
         ppm = f"P6\n{w} {h}\n255\n".encode("ascii") + rgb.astype(np.uint8).tobytes()
-        self._img = tk.PhotoImage(data=base64.b64encode(ppm), format="PPM")
+        try:
+            self._img = tk.PhotoImage(data=base64.b64encode(ppm).decode("ascii"), format="PPM")
+        except tk.TclError:
+            self._img = tk.PhotoImage(width=w, height=h)
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, anchor="nw", image=self._img)
         self.canvas.configure(scrollregion=(0, 0, w, h))
 
 
 class MainWindow(tk.Tk):
+    PAGE_TITLES: dict[str, str] = {
+        "device_mode": "Device & Mode",
+        "slm_patterns_blaze": "SLM Patterns & Blaze",
+        "camera_telemetry": "Camera & Telemetry",
+        "plot_workspace": "Plot Workspace",
+        "optimization": "Optimization (WGS + Ratio)",
+        "calibration": "Calibration",
+        "session_output_recipes": "Session/Output/Recipes",
+        "logs_diagnostics": "Logs/Diagnostics",
+    }
+    PANEL_TO_PAGE: dict[str, str] = {
+        "Device": "device_mode",
+        "SLM": "slm_patterns_blaze",
+        "Camera": "camera_telemetry",
+        "Plots": "plot_workspace",
+        "Optimization": "optimization",
+        "Ratio Targets": "optimization",
+        "Calibration": "calibration",
+        "Session": "session_output_recipes",
+        "Logs": "logs_diagnostics",
+    }
     PANEL_NAMES = ["Device", "SLM", "Camera", "Plots", "Optimization", "Ratio Targets", "Calibration", "Logs", "Session"]
 
     def __init__(self, controller: AppController) -> None:
@@ -129,19 +153,17 @@ class MainWindow(tk.Tk):
 
         self.panel_frames: dict[str, ttk.LabelFrame] = {}
         self.panel_columns: dict[str, str] = {}
+        self.panel_home_columns: dict[str, str] = {}
         self.visibility_vars = {name: tk.BooleanVar(value=True) for name in self.PANEL_NAMES}
         self.plot_popouts: dict[str, tk.Toplevel] = {}
         self.plot_widgets: dict[str, PlotWidget] = {}
 
-        self.main_pane = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        self.main_pane.pack(fill=tk.BOTH, expand=True)
-        self.left = ttk.Frame(self.main_pane)
-        self.center = ttk.Frame(self.main_pane)
-        self.right = ttk.Frame(self.main_pane)
-        self.column_frames = {"left": self.left, "center": self.center, "right": self.right}
-        self.main_pane.add(self.left, weight=1)
-        self.main_pane.add(self.center, weight=2)
-        self.main_pane.add(self.right, weight=1)
+        self.page_notebook = ttk.Notebook(self)
+        self.page_notebook.pack(fill=tk.BOTH, expand=True)
+        self.page_panels: dict[str, ttk.PanedWindow] = {}
+        self.page_columns: dict[str, dict[str, ttk.Frame]] = {}
+        self.page_nav_var = tk.StringVar(value=self.PAGE_TITLES["device_mode"])
+        self._build_page_shell()
 
         self.status_var = tk.StringVar(value="Ready")
         self._build_all_panels()
@@ -183,10 +205,49 @@ class MainWindow(tk.Tk):
         self._build_logs_panel()
         self._build_session_panel()
 
+    def _build_page_shell(self) -> None:
+        nav = ttk.Frame(self)
+        nav.pack(fill=tk.X, padx=4, pady=(4, 2), before=self.page_notebook)
+        ttk.Label(nav, text="Navigate:").pack(side=tk.LEFT, padx=(0, 6))
+        for page_key, page_title in self.PAGE_TITLES.items():
+            ttk.Button(nav, text=page_title, command=lambda key=page_key: self.select_page(key)).pack(side=tk.LEFT, padx=2)
+
+            page = ttk.Frame(self.page_notebook)
+            self.page_notebook.add(page, text=page_title)
+            pane = ttk.PanedWindow(page, orient=tk.HORIZONTAL)
+            pane.pack(fill=tk.BOTH, expand=True)
+            left = ttk.Frame(pane)
+            center = ttk.Frame(pane)
+            right = ttk.Frame(pane)
+            pane.add(left, weight=1)
+            pane.add(center, weight=2)
+            pane.add(right, weight=1)
+            self.page_panels[page_key] = pane
+            self.page_columns[page_key] = {"left": left, "center": center, "right": right}
+
+        self.page_notebook.bind("<<NotebookTabChanged>>", self._sync_page_nav_state)
+
+    def _sync_page_nav_state(self, _event: object | None = None) -> None:
+        idx = self.page_notebook.index("current")
+        page_title = self.page_notebook.tab(idx, "text")
+        self.page_nav_var.set(page_title)
+
+    def select_page(self, page_key: str) -> None:
+        target = self.PAGE_TITLES.get(page_key)
+        if target is None:
+            return
+        for idx in range(self.page_notebook.index("end")):
+            if self.page_notebook.tab(idx, "text") == target:
+                self.page_notebook.select(idx)
+                self.page_nav_var.set(target)
+                return
+
     def _create_panel(self, panel_name: str, column: str) -> ttk.LabelFrame:
-        frame = ttk.LabelFrame(self.column_frames[column], text=f"{panel_name} Panel")
+        page_key = self.PANEL_TO_PAGE[panel_name]
+        frame = ttk.LabelFrame(self.page_columns[page_key][column], text=f"{panel_name} Panel")
         self.panel_frames[panel_name] = frame
         self.panel_columns[panel_name] = column
+        self.panel_home_columns[panel_name] = column
         return frame
 
     def _build_device_panel(self) -> None:
@@ -790,7 +851,14 @@ class MainWindow(tk.Tk):
 
     def _move_selected_panel_to_column(self) -> None:
         panel_name = self.arrange_panel.get()
-        self.panel_columns[panel_name] = self.target_column.get()
+        target = self.target_column.get()
+        home = self.panel_home_columns.get(panel_name, self.panel_columns.get(panel_name, target))
+        if target != home:
+            self.status_var.set(
+                f"Panel '{panel_name}' cannot move to {target}; fixed to {home} to preserve Tk parent." 
+            )
+            target = home
+        self.panel_columns[panel_name] = target
         self._repack_panels(self._current_layout_columns())
 
     def _move_selected_panel(self, direction: int) -> None:
@@ -830,31 +898,34 @@ class MainWindow(tk.Tk):
         for panel_name in self.PANEL_NAMES:
             col = self.panel_columns.get(panel_name, "left")
             columns[col].append(panel_name)
-
-        for col_name in columns:
-            packed_names: list[str] = []
-            for child in self.column_frames[col_name].pack_slaves():
-                for name, panel in self.panel_frames.items():
-                    if panel is child:
-                        packed_names.append(name)
-                        break
-            for panel_name in columns[col_name]:
-                if panel_name not in packed_names:
-                    packed_names.append(panel_name)
-            columns[col_name] = packed_names
-
         return columns
 
     def _repack_panels(self, columns: dict[str, list[str]]) -> None:
-        for col_name, frame in self.column_frames.items():
-            for child in frame.pack_slaves():
-                child.pack_forget()
+        for page_columns in self.page_columns.values():
+            for frame in page_columns.values():
+                for child in frame.pack_slaves():
+                    child.pack_forget()
+
+        for col_name in ["left", "center", "right"]:
             for panel_name in columns.get(col_name, []):
                 self.panel_columns[panel_name] = col_name
-                if self.visibility_vars[panel_name].get():
-                    self.panel_frames[panel_name].pack(fill=tk.X, padx=6, pady=6)
-        if self.visibility_vars["Plots"].get():
-            self.panel_frames["Plots"].pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+                if not self.visibility_vars[panel_name].get():
+                    continue
+                page_key = self.PANEL_TO_PAGE[panel_name]
+                panel = self.panel_frames[panel_name]
+                home = self.panel_home_columns.get(panel_name, col_name)
+                if col_name != home:
+                    continue
+                expected_parent = str(self.page_columns[page_key][home])
+                if str(panel.master) != expected_parent:
+                    self.status_var.set(
+                        f"Skipping panel '{panel_name}' due to parent mismatch in saved layout; using safe defaults."
+                    )
+                    continue
+                if panel_name == "Plots":
+                    panel.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+                else:
+                    panel.pack(fill=tk.X, padx=6, pady=6)
 
     def _capture_layout_model(self) -> dict:
         popouts = []
@@ -865,7 +936,11 @@ class MainWindow(tk.Tk):
             "window_geometry": self.geometry(),
             "columns": self._current_layout_columns(),
             "visibility": {name: var.get() for name, var in self.visibility_vars.items()},
-            "sashes": {"main": [self.main_pane.sashpos(0), self.main_pane.sashpos(1)]},
+            "current_page": self.page_nav_var.get(),
+            "sashes": {
+                page_key: [pane.sashpos(0), pane.sashpos(1)]
+                for page_key, pane in self.page_panels.items()
+            },
             "popout_plots": popouts,
         }
 
@@ -880,14 +955,22 @@ class MainWindow(tk.Tk):
         for col_name in ["left", "center", "right"]:
             for panel_name in columns.get(col_name, []):
                 if panel_name in self.panel_columns:
-                    self.panel_columns[panel_name] = col_name
+                    self.panel_columns[panel_name] = self.panel_home_columns.get(panel_name, col_name)
         self._repack_panels(columns)
 
-        sashes = model.get("sashes", {}).get("main", [])
-        if len(sashes) >= 1:
-            self.after(1, lambda: self.main_pane.sashpos(0, int(sashes[0])))
-        if len(sashes) >= 2:
-            self.after(1, lambda: self.main_pane.sashpos(1, int(sashes[1])))
+        for page_key, pane in self.page_panels.items():
+            sashes = model.get("sashes", {}).get(page_key, [])
+            if len(sashes) >= 1:
+                self.after(1, lambda key=page_key, value=sashes[0]: self.page_panels[key].sashpos(0, int(value)))
+            if len(sashes) >= 2:
+                self.after(1, lambda key=page_key, value=sashes[1]: self.page_panels[key].sashpos(1, int(value)))
+
+        page_title = model.get("current_page")
+        if isinstance(page_title, str):
+            for key, title in self.PAGE_TITLES.items():
+                if title == page_title:
+                    self.select_page(key)
+                    break
 
         for window in list(self.plot_popouts.values()):
             if window.winfo_exists():
@@ -901,7 +984,11 @@ class MainWindow(tk.Tk):
 
     def restore_layout(self) -> None:
         model = self.store.load_layout_model(self.layout_path)
-        self._apply_layout_model(model)
+        try:
+            self._apply_layout_model(model)
+        except tk.TclError as exc:
+            self.status_var.set(f"Layout restore failed; resetting to safe defaults ({exc}).")
+            self._apply_layout_model(self.store.default_layout_model())
 
     def _reset_layout(self) -> None:
         self._apply_layout_model(self.store.default_layout_model())

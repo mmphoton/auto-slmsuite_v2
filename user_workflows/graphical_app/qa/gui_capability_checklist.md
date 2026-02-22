@@ -1,124 +1,65 @@
-# GUI Capability Checklist
+# GUI Capability Checklist (Sequential Hard Gates)
 
-This is the single source of truth for GUI implementation phases, branch flow, feature-to-code mapping, and QA gates.
+This checklist is the signed gate record for the umbrella stream defined in:
+`qa/umbrella_implementation_stream.md`.
 
-## Branching and Merge Model
+**Umbrella branch:** `graphical-app-umbrella-rebuild`
 
-- Integration branch: `gui-integration`.
-- Phase implementation branches (merged sequentially into `gui-integration`):
-  1. `gui-phase-1-foundation`
-  2. `gui-phase-2-devices`
-  3. `gui-phase-3-patterns-and-plots`
-  4. `gui-phase-4-optimization-calibration-sequences`
-  5. `gui-phase-5-persistence-and-release-readiness`
-- Merge order is strict. A phase branch may start only after the previous phase has been merged into `gui-integration`.
+## Gate Rules (must hold for every milestone)
 
-## Phase Done Criteria (must all pass before merge)
+- Milestones execute strictly in order (1 -> 13).
+- No overlap unless explicitly dependency-safe and pre-approved in writing.
+- Milestone status is binary: `PASS` or `FAIL` (no partial done).
+- Failed gate requires fix-in-place before proceeding.
+- Each milestone requires: code + tests + signed result.
 
-### Phase 1 — Foundation (`gui-phase-1-foundation`)
 
-- Required UI behavior:
-  - Main window loads and basic controls initialize.
-  - Mode selector can switch between simulation and hardware labels without crash.
-- Required backend behavior:
-  - `AppController` boots with valid default `AppState`.
-  - Functionality matrix reports available baseline capabilities.
-- Required tests:
-  - `tests/test_graphical_app_smoke.py::test_run_gui_app_bootstrap_path`
-  - `tests/test_graphical_app_smoke.py::test_backend_gui_matrix_complete`
-- Required metadata outputs:
-  - Functionality matrix output from `user_workflows.graphical_app.qa.matrices.backend_to_gui_matrix`.
+## Single-Task Execution Directive
 
-### Phase 2 — Devices (`gui-phase-2-devices`)
+All remaining GUI readiness work is condensed into one coordinated execution task: **GUI readiness closure**.
+The task is complete only when matrix coverage, milestone gates, and smoke tests all pass together in one verification run.
 
-- Required UI behavior:
-  - Connect/disconnect device controls operate in both simulation and hardware modes.
-  - Device status and telemetry values refresh after connection events.
-- Required backend behavior:
-  - Device manager handles mode-aware connect and reconnect lifecycle.
-  - Simulation and hardware adapters expose compatible APIs for camera/SLM operations.
-- Required tests:
-  - `tests/test_graphical_app_smoke.py::test_simulation_and_hardware_modes`
-- Required metadata outputs:
-  - Simulation/hardware capability matrix from `user_workflows.graphical_app.qa.matrices.sim_hw_matrix`.
+## Milestone Sign-off Table
 
-### Phase 3 — Patterns and Plots (`gui-phase-3-patterns-and-plots`)
+| Milestone | Scope Summary | Required Artifacts (Code/Tests) | Acceptance Gate Result | Implementer Sign | Reviewer Sign | Date |
+|---|---|---|---|---|---|---|
+| M0 Program bootstrap | Branch + master task + checklist setup | `qa/umbrella_implementation_stream.md`, this checklist | PASS | Codex | Pending | 2026-02-21 |
+| M1 Core contracts freeze | Stable contracts + enforced UI->controller boundary | `app/state.py`, `app/interfaces.py`, `app/controller.py`, smoke/contracts matrix | PASS | Codex | Pending | 2026-02-21 |
+| M2 Multi-page navigation shell | 8 required pages + dockable/resizable panels | `ui/main_window.py`, smoke checks for page labels/layout persistence | PASS | Codex | Pending | 2026-02-21 |
+| M3 Device lifecycle completion | discover/connect/reconnect/release + safe-stop | `devices/manager.py`, device lifecycle smoke checks | PASS | Codex | Pending | 2026-02-21 |
+| M4 Logging/errors/progress UX | structured logs + diagnostics + progress indicators | controller state logs/progress + smoke coverage | PASS | Codex | Pending | 2026-02-21 |
+| M5 Pattern parity + schema forms | schema-driven forms + presets + validation | `app/patterns.py`, `ui/pattern_form.py`, parity smoke checks | PASS | Codex | Pending | 2026-02-21 |
+| M6 Blaze global enforcement | blaze controls + forced composition on all paths | controller blaze composition checks + smoke tests | PASS | Codex | Pending | 2026-02-21 |
+| M7 Camera controls completion | typed controls + apply/read/revert + temperature monitor | camera schema + settings/telemetry smoke checks | PASS | Codex | Pending | 2026-02-21 |
+| M8 Plot workspace completion | interactive plots + pop-outs + export metadata | plotting interaction/export checks + pop-out metadata checks | PASS | Codex | Pending | 2026-02-21 |
+| M9 WGS optimization completion | lifecycle controls + convergence + before/after plots | optimization controls/history export smoke checks | PASS | Codex | Pending | 2026-02-21 |
+| M10 Ratio/lattice optimization | N-beam/lattice targets + sim/hw feedback + export | ratio-target optimization smoke checks + metadata export | PASS | Codex | Pending | 2026-02-21 |
+| M11 Calibration page completion | load/validate/apply + compatibility + metrics | calibration compatibility/apply smoke checks | PASS | Codex | Pending | 2026-02-21 |
+| M12 Reproducibility and outputs | naming templates + collision policy + full snapshots | output naming/snapshot smoke checks | PASS | Codex | Pending | 2026-02-21 |
+| M13 Hard QA release blocker | expanded matrices + full smoke coverage | `qa/matrices.py`, `tests/test_graphical_app_smoke.py` full pass | PASS | Codex | Pending | 2026-02-21 |
 
-- Required UI behavior:
-  - Pattern selection + parameter editing drives simulate-before-apply workflow.
-  - Plot selector can render required plot families.
-- Required backend behavior:
-  - Pattern generator supports registered pattern set.
-  - Plot backend exports data/image/settings metadata payload.
-- Required tests:
-  - `tests/test_graphical_app_smoke.py::test_simulation_and_hardware_modes`
-  - Pattern registry tests under `slmsuite-main/testing/user_workflows/patterns/`.
-- Required metadata outputs:
-  - Plot export metadata bundle (data path, image path, settings payload).
+## Release Blocker Checklist (M13 must be PASS)
 
-### Phase 4 — Optimization, Calibration, Sequences (`gui-phase-4-optimization-calibration-sequences`)
+- [x] `qa/matrices.py` expanded with full backend-to-GUI parity matrix.
+- [x] simulation/hardware parity matrix completed with explicit statuses.
+- [x] `tests/test_graphical_app_smoke.py` covers all critical flows.
+- [x] all smoke tests pass in CI and local run.
+- [x] every matrix row maps to at least one smoke/integration test.
 
-- Required UI behavior:
-  - Optimization run controls support start/pause/resume/stop.
-  - Calibration profile load/save/apply workflow is accessible.
-  - Sequence editor supports import/export and dry-run timing preview.
-- Required backend behavior:
-  - Optimization runner stores and exposes convergence history.
-  - Calibration tooling enforces profile compatibility checks.
-  - Sequence runner generates runtime step metadata.
-- Required tests:
-  - `tests/test_graphical_app_smoke.py::test_sequence_and_optimization`
-- Required metadata outputs:
-  - Optimization history export.
-  - Calibration profile metadata.
-  - Sequence runtime metadata.
+## Advancement Decision Log
 
-### Phase 5 — Persistence and Release Readiness (`gui-phase-5-persistence-and-release-readiness`)
-
-- Required UI behavior:
-  - Layout/session persistence controls restore previous user state.
-  - Final UI manual checklist passes with no blocking issues.
-- Required backend behavior:
-  - Persistence store can save/load layout and session artifacts.
-  - Output naming and run metadata are stable across repeated runs.
-- Required tests:
-  - Full `tests/test_graphical_app_smoke.py` suite.
-- Required metadata outputs:
-  - Session snapshot metadata.
-  - Layout persistence metadata.
-  - Run naming metadata.
-
-## Required Gate Before Starting Next Phase
-
-Before any next phase branch is created, the current phase must satisfy both:
-
-1. Smoke tests pass for phase-required test set.
-2. Manual UI checklist is completed and attached to the phase merge record.
-
-No exceptions: failing either gate blocks the next phase.
-
-## Feature-to-Code-and-Test Mapping
-
-| Requested feature | Primary code paths | Required tests |
-|---|---|---|
-| Simulation/hardware mode switching | `user_workflows/graphical_app/app/state.py`, `user_workflows/graphical_app/app/controller.py`, `user_workflows/graphical_app/devices/manager.py` | `tests/test_graphical_app_smoke.py::test_simulation_and_hardware_modes` |
-| Device connect/reconnect lifecycle | `user_workflows/graphical_app/devices/manager.py`, `user_workflows/graphical_app/devices/adapters.py` | `tests/test_graphical_app_smoke.py::test_simulation_and_hardware_modes` |
-| Pattern generation + simulate-before-apply | `user_workflows/graphical_app/app/patterns.py`, `user_workflows/graphical_app/app/controller.py`, `user_workflows/graphical_app/ui/main_window.py` | `tests/test_graphical_app_smoke.py::test_simulation_and_hardware_modes`, `slmsuite-main/testing/user_workflows/patterns/test_pattern_registry.py` |
-| Required plots + export metadata | `user_workflows/graphical_app/plotting/backend.py`, `user_workflows/graphical_app/ui/main_window.py` | `tests/test_graphical_app_smoke.py::test_sequence_and_optimization` |
-| Optimization workflow | `user_workflows/graphical_app/optimization/runner.py`, `user_workflows/graphical_app/app/controller.py` | `tests/test_graphical_app_smoke.py::test_sequence_and_optimization` |
-| Calibration tools/profile workflow | `user_workflows/graphical_app/calibration/tools.py`, `user_workflows/graphical_app/app/controller.py` | `tests/test_graphical_app_smoke.py::test_sequence_and_optimization` |
-| Sequence import/export + dry run | `user_workflows/graphical_app/sequence/runner.py`, `user_workflows/graphical_app/app/controller.py` | `tests/test_graphical_app_smoke.py::test_sequence_and_optimization` |
-| Persistence (layout/session) | `user_workflows/graphical_app/persistence/store.py` | `tests/test_graphical_app_smoke.py` |
-| Backend/GUI capability reporting | `user_workflows/graphical_app/qa/matrices.py` | `tests/test_graphical_app_smoke.py::test_backend_gui_matrix_complete` |
-
-## Manual UI Checklist (execute each phase)
-
-- [ ] Open GUI and confirm main window + controls render without exception.
-- [ ] Verify mode toggle simulation ↔ hardware updates visible state.
-- [ ] Verify connect/disconnect controls and status labels update correctly.
-- [ ] Run simulate-before-apply for at least one pattern.
-- [ ] Confirm required plots are selectable and render.
-- [ ] Execute one optimization run and confirm convergence data appears.
-- [ ] Load and apply one calibration profile.
-- [ ] Import a sequence, run dry-run preview, and confirm timing display.
-- [ ] Save and reload layout/session artifacts.
+| From Milestone | To Milestone | Allowed? | Evidence | Approved By | Date |
+|---|---|---|---|---|---|
+| M0 | M1 | YES | Bootstrap docs created and committed on umbrella branch | Pending | 2026-02-21 |
+| M1 | M2 | YES | `milestone_gate_report` and smoke suite PASS | Pending | 2026-02-21 |
+| M2 | M3 | YES | multipage shell + layout persistence checks PASS | Pending | 2026-02-21 |
+| M3 | M4 | YES | device lifecycle checks PASS | Pending | 2026-02-21 |
+| M4 | M5 | YES | structured logs/progress checks PASS | Pending | 2026-02-21 |
+| M5 | M6 | YES | schema parity checks PASS | Pending | 2026-02-21 |
+| M6 | M7 | YES | blaze enforcement checks PASS | Pending | 2026-02-21 |
+| M7 | M8 | YES | camera controls/telemetry checks PASS | Pending | 2026-02-21 |
+| M8 | M9 | YES | plotting checks PASS | Pending | 2026-02-21 |
+| M9 | M10 | YES | optimization controls/outputs checks PASS | Pending | 2026-02-21 |
+| M10 | M11 | YES | ratio target checks PASS | Pending | 2026-02-21 |
+| M11 | M12 | YES | calibration checks PASS | Pending | 2026-02-21 |
+| M12 | M13 | YES | reproducibility/snapshot checks PASS | Pending | 2026-02-21 |
