@@ -910,13 +910,10 @@ class MainWindow(tk.Tk):
                     continue
                 page_key = self.PANEL_TO_PAGE[panel_name]
                 panel = self.panel_frames[panel_name]
-                home = self.panel_home_columns.get(panel_name, col_name)
-                if col_name != home:
-                    continue
                 if panel_name == "Plots":
-                    panel.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+                    panel.pack(in_=self.page_columns[page_key][col_name], fill=tk.BOTH, expand=True, padx=6, pady=6)
                 else:
-                    panel.pack(fill=tk.X, padx=6, pady=6)
+                    panel.pack(in_=self.page_columns[page_key][col_name], fill=tk.X, padx=6, pady=6)
 
     def _capture_layout_model(self) -> dict:
         popouts = []
