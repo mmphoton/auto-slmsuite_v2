@@ -4,7 +4,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from user_workflows.graphical_app.app.controller import AppController
 from user_workflows.graphical_app.app.state import Mode
-from user_workflows.graphical_app.qa.matrices import backend_to_gui_matrix, release_freeze_ready, sim_hw_matrix
+from user_workflows.graphical_app.qa.matrices import backend_to_gui_matrix, milestone_gate_report, release_freeze_ready, sim_hw_matrix
 
 
 def test_backend_gui_matrix_complete():
@@ -421,4 +421,34 @@ def test_release_freeze_requires_matrix_coverage_and_smoke_pass():
     ready = release_freeze_ready(smoke_suite_passed=True)
     assert ready["coverage_complete"] is True
     assert ready["smoke_suite_passed"] is True
+    assert ready["release_freeze_ready"] is True
+
+
+def test_main_window_declares_required_notebook_pages():
+    source = Path("user_workflows/graphical_app/ui/main_window.py").read_text(encoding="utf-8")
+    assert "PAGE_TITLES" in source
+    for page in (
+        "Device & Mode",
+        "SLM Patterns & Blaze",
+        "Camera & Telemetry",
+        "Plot Workspace",
+        "Optimization (WGS + Ratio)",
+        "Calibration",
+        "Session/Output/Recipes",
+        "Logs/Diagnostics",
+    ):
+        assert page in source
+
+
+def test_milestone_gate_report_complete_with_smoke_pass():
+    gates = milestone_gate_report(smoke_suite_passed=True)
+    assert set(gates.keys()) == {
+        "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M12", "M13"
+    }
+    assert all(gates.values())
+
+
+def test_release_freeze_ready_tracks_milestone_completion():
+    ready = release_freeze_ready(smoke_suite_passed=True)
+    assert ready["milestones_complete"] is True
     assert ready["release_freeze_ready"] is True

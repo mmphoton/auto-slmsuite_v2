@@ -150,6 +150,7 @@ class MainWindow(tk.Tk):
 
         self.panel_frames: dict[str, ttk.LabelFrame] = {}
         self.panel_columns: dict[str, str] = {}
+        self.panel_home_columns: dict[str, str] = {}
         self.visibility_vars = {name: tk.BooleanVar(value=True) for name in self.PANEL_NAMES}
         self.plot_popouts: dict[str, tk.Toplevel] = {}
         self.plot_widgets: dict[str, PlotWidget] = {}
@@ -243,6 +244,7 @@ class MainWindow(tk.Tk):
         frame = ttk.LabelFrame(self.page_columns[page_key][column], text=f"{panel_name} Panel")
         self.panel_frames[panel_name] = frame
         self.panel_columns[panel_name] = column
+        self.panel_home_columns[panel_name] = column
         return frame
 
     def _build_device_panel(self) -> None:
@@ -846,7 +848,14 @@ class MainWindow(tk.Tk):
 
     def _move_selected_panel_to_column(self) -> None:
         panel_name = self.arrange_panel.get()
-        self.panel_columns[panel_name] = self.target_column.get()
+        target = self.target_column.get()
+        home = self.panel_home_columns.get(panel_name, self.panel_columns.get(panel_name, target))
+        if target != home:
+            self.status_var.set(
+                f"Panel '{panel_name}' cannot move to {target}; fixed to {home} to preserve Tk parent." 
+            )
+            target = home
+        self.panel_columns[panel_name] = target
         self._repack_panels(self._current_layout_columns())
 
     def _move_selected_panel(self, direction: int) -> None:
@@ -934,7 +943,7 @@ class MainWindow(tk.Tk):
         for col_name in ["left", "center", "right"]:
             for panel_name in columns.get(col_name, []):
                 if panel_name in self.panel_columns:
-                    self.panel_columns[panel_name] = col_name
+                    self.panel_columns[panel_name] = self.panel_home_columns.get(panel_name, col_name)
         self._repack_panels(columns)
 
         for page_key, pane in self.page_panels.items():
