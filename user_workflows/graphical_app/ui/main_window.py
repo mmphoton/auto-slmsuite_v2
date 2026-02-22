@@ -110,7 +110,10 @@ class PlotWidget(ttk.Frame):
             rgb = np.stack([rgb, rgb, rgb], axis=-1)
         h, w = rgb.shape[:2]
         ppm = f"P6\n{w} {h}\n255\n".encode("ascii") + rgb.astype(np.uint8).tobytes()
-        self._img = tk.PhotoImage(data=base64.b64encode(ppm), format="PPM")
+        try:
+            self._img = tk.PhotoImage(data=base64.b64encode(ppm).decode("ascii"), format="PPM")
+        except tk.TclError:
+            self._img = tk.PhotoImage(width=w, height=h)
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, anchor="nw", image=self._img)
         self.canvas.configure(scrollregion=(0, 0, w, h))
