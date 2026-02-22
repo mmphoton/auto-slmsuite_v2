@@ -8,6 +8,23 @@ This directory contains the operator-facing workflows for:
 
 ---
 
+## Migration note
+**GUI removed; all operations are CLI-driven.**
+
+---
+
+## Spyder terminal workflow
+Run these commands from a Spyder terminal (or any shell):
+
+```bash
+python user_workflows/cli.py workflow calibrate ...
+python user_workflows/cli.py workflow pattern ...
+python user_workflows/cli.py workflow acquire ...
+python user_workflows/cli.py workflow feedback ...
+```
+
+---
+
 ## Calibration producer
 Run `run_calibration.py` first to generate the calibration artifacts consumed by downstream workflows.
 
