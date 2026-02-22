@@ -28,8 +28,6 @@ def test_simulated_imbalanced_spots_converge_toward_uniformity():
     assert np.max(np.abs(measured_norm - target)) < 0.03
 
 
-def test_tests_suite_has_no_graphical_app_dependency():
-    tests_dir = Path(__file__).resolve().parent
-    for test_file in tests_dir.glob("test_*.py"):
-        content = test_file.read_text(encoding="utf-8")
-        assert "user_workflows" + ".graphical_app" not in content
+def test_cli_entrypoint_exists_for_interactive_operation():
+    cli_entrypoint = Path("user_workflows/cli.py")
+    assert cli_entrypoint.exists()

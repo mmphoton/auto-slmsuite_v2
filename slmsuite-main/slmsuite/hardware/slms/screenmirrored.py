@@ -55,8 +55,6 @@ class ScreenMirrored(SLM):
           through the ``PyGObject`` package wrapping ``GTK`` and other GUI libraries.
         - :mod:`pyqt6` (`link <https://riverbankcomputing.com/software/pyqt/>`__),
           through the ``PyQt6`` package wrapping the version 6 ``Qt`` GUI library.
-        - :mod:`tkinter` (`link <https://docs.python.org/3/library/tkinter.html>`__),
-          included in standard ``python``, wrapping the ``Tcl``/``Tk`` GUI library.
         - :mod:`wx` (`link <https://docs.wxpython.org/>`__),
           through the ``wxPython`` package wrapping the ``wxWidgets`` GUI library.
           :mod:`slmpy` (`GitHub <https://github.com/wavefrontshaping/slmPy>`__) uses :mod:`wx`.
