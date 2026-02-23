@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 from pathlib import Path
 
 import numpy as np
 
+from user_workflows.andor_camera import verify_camera_discoverable
 from user_workflows.calibration_io import calibration_paths
 from user_workflows.commands.calibrate import load_phase_lut
 
@@ -19,15 +19,12 @@ def add_doctor_args(parser: argparse.ArgumentParser):
     parser.add_argument("--output-dir", default="user_workflows/output")
 
 
-def _check_sdk_import():
-    importlib.import_module("pyAndorSDK2")
+def _check_pylablib_import():
+    from pylablib.devices import Andor as _Andor  # noqa: F401
 
 
 def _check_camera_discovery():
-    from slmsuite.hardware.cameras.andor_idus import AndorIDus
-    cams = AndorIDus.info(verbose=False)
-    if not cams:
-        raise RuntimeError("No Andor cameras discovered.")
+    verify_camera_discoverable("")
 
 
 def _check_lut(path: Path, key: str):
@@ -68,9 +65,9 @@ def _run_check(name: str, fn, fix: str):
 def run_doctor(args):
     checks = [
         (
-            "SDK import availability",
-            _check_sdk_import,
-            "Install SDK bindings: `pip install -e pyAndorSDK2`.",
+            "pylablib Andor import availability",
+            _check_pylablib_import,
+            "Install pylablib bindings: `pip install pylablib`.",
         ),
         (
             "LUT file existence/shape",
