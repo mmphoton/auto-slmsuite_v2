@@ -32,8 +32,10 @@ def run_feedback_optimization(fs, iterations: int):
 
 
 def run_feedback(args):
-    lut_path = Path(args.lut_file)
-    deep = load_phase_lut(lut_path, args.lut_key)
+    deep = None
+    if args.use_phase_depth_correction:
+        lut_path = Path(args.lut_file)
+        deep = load_phase_lut(lut_path, args.lut_key)
 
     if args.dry_run:
         print("[dry-run] feedback config validated. Hardware will not be touched.")
