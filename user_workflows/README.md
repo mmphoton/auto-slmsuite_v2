@@ -69,12 +69,14 @@ python user_workflows/run_slm_andor.py \
 ```bash
 python user_workflows/two_gaussian_wgs_test.py \
   --lut-file deep_1024.mat \
-  --separation-kxy 0.03 \
+  --separation-knm 30 \
   --blaze-k 0.003 \
   --run-experimental-wgs
 ```
 
 Use `--no-phase-depth-correction` to generate/display patterns without loading LUT or other calibration files.
+
+Note: this script uses SLM-only `knm` coordinates (`--center-knm-x`, `--center-knm-y`, `--separation-knm`) so it runs without a camera wrapper during initial display.
 
 ## Spyder troubleshooting note
 If launching from Spyder, make sure you are executing from the **project root** and that the repo root is on `sys.path`; otherwise imports like `user_workflows.*` may fail.

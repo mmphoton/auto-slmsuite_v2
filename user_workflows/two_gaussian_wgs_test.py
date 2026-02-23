@@ -31,12 +31,33 @@ def _hold_until_interrupt(slm, cam=None):
         slm.close()
 
 
+def _build_two_spot_phase(args, slm):
+    """Build two-spot phase using SpotHologram in SLM-only coordinates.
+
+    We intentionally use the "knm" basis here so generation works with an SLM
+    object directly (no camera/Fourier calibration wrapper required).
+    """
+    from slmsuite.holography.algorithms import SpotHologram
+
+    shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+    half_sep = float(args.separation_knm) / 2.0
+    spot_knm = np.array(
+        [
+            [args.center_knm_x - half_sep, args.center_knm_x + half_sep],
+            [args.center_knm_y, args.center_knm_y],
+        ]
+    )
+    hologram = SpotHologram(shape, spot_vectors=spot_knm, basis="knm", cameraslm=None)
+    hologram.optimize(method=args.holo_method, maxiter=args.holo_maxiter, feedback="computational")
+    return np.mod(hologram.get_phase(), 2 * np.pi)
+
+
 def run(args):
     bootstrap_runtime(repo_root=args.repo_root, sdk_root=args.sdk_root)
 
     from slmsuite.hardware.cameraslms import FourierSLM
     from slmsuite.hardware.slms.holoeye import Holoeye
-    from slmsuite.holography.algorithms import FeedbackHologram, SpotHologram
+    from slmsuite.holography.algorithms import FeedbackHologram
     from slmsuite.holography.toolbox.phase import blaze
 
     deep = None
@@ -45,24 +66,16 @@ def run(args):
 
     slm = Holoeye(preselect="index:0")
 
-    shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
-    half_sep = float(args.separation_kxy) / 2.0
-    spot_kxy = np.array(
-        [
-            [args.center_kx - half_sep, args.center_kx + half_sep],
-            [args.center_ky, args.center_ky],
-        ]
-    )
-    hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
-    hologram.optimize(method=args.holo_method, maxiter=args.holo_maxiter, feedback="computational")
+    if args.separation_kxy is not None:
+        args.separation_knm = float(args.separation_kxy)
 
-    phase_wrapped = np.mod(hologram.get_phase(), 2 * np.pi)
+    phase_wrapped = _build_two_spot_phase(args, slm)
     phase_wrapped = np.mod(phase_wrapped + blaze(grid=slm, vector=(args.blaze_k, args.blaze_k)), 2 * np.pi)
     phase_to_show = depth_correct(phase_wrapped, deep) if args.use_phase_depth_correction else phase_wrapped
     slm.set_phase(phase_to_show, settle=True)
     print(
         "Displayed two-spot Gaussian pattern "
-        f"(radius_hint={args.radius_hint_px}px, separation_kxy={args.separation_kxy}, blaze={args.blaze_k})."
+        f"(radius_hint={args.radius_hint_px}px, separation_knm={args.separation_knm}, blaze={args.blaze_k})."
     )
 
     if not args.run_experimental_wgs:
@@ -108,9 +121,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-phase-depth-correction", dest="use_phase_depth_correction", action="store_false")
 
     parser.add_argument("--radius-hint-px", type=float, default=25.0, help="Operator note for desired spot radius.")
-    parser.add_argument("--center-kx", type=float, default=0.0)
-    parser.add_argument("--center-ky", type=float, default=0.0)
-    parser.add_argument("--separation-kxy", type=float, default=0.03)
+    parser.add_argument("--center-knm-x", type=float, default=0.0, help="Center x in knm basis.")
+    parser.add_argument("--center-knm-y", type=float, default=0.0, help="Center y in knm basis.")
+    parser.add_argument("--separation-knm", type=float, default=30.0, help="Spot separation in knm basis.")
+
+    parser.add_argument(
+        "--separation-kxy",
+        type=float,
+        default=None,
+        help="Deprecated alias for --separation-knm (kept for compatibility).",
+    )
     parser.add_argument("--blaze-k", type=float, default=0.003)
     parser.add_argument("--holo-method", default="WGS-Kim")
     parser.add_argument("--holo-maxiter", type=int, default=40)
