@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from user_workflows.calibration_io import assert_required_calibration_files
+from user_workflows.andor_camera import AndorConnectionConfig, PylablibAndorCamera
 from user_workflows.commands.pattern import build_pattern, hold_until_interrupt, load_phase_lut
 
 
@@ -20,13 +21,14 @@ def add_acquire_args(parser: argparse.ArgumentParser):
 
 
 def create_fourier_slm(args):
-    from slmsuite.hardware.cameras.andor_idus import AndorIDus
     from slmsuite.hardware.cameraslms import FourierSLM
     from slmsuite.hardware.slms.holoeye import Holoeye
 
     slm = Holoeye(preselect="index:0")
-    cam = AndorIDus(serial=args.camera_serial, target_temperature_c=-65, shutter_mode="auto", verbose=True)
-    cam.set_exposure(args.exposure_s)
+    cam = PylablibAndorCamera(
+        AndorConnectionConfig(camera_serial=args.camera_serial, exposure_s=args.exposure_s, shutter_mode="auto"),
+        verbose=True,
+    )
 
     fs = FourierSLM(cam, slm)
     calibration_paths = assert_required_calibration_files(args.calibration_root)

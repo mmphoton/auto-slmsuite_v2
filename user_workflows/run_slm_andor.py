@@ -4,21 +4,25 @@ from __future__ import annotations
 
 import argparse
 import pprint
+import sys
 import time
 import warnings
+
+import numpy as np
+import scipy.io
 from pathlib import Path
 from typing import Any
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from slmsuite.hardware.cameras.andor_idus import AndorIDus
 from slmsuite.hardware.cameraslms import FourierSLM
 from slmsuite.hardware.slms.holoeye import Holoeye
 from slmsuite.holography.algorithms import FeedbackHologram, SpotHologram
 from slmsuite.holography.toolbox import phase
 from slmsuite.holography.toolbox.phase import blaze
 
+from user_workflows.andor_camera import AndorConnectionConfig, PylablibAndorCamera
 from user_workflows.calibration_io import assert_required_calibration_files
 from user_workflows.config import dump_yaml, load_workflow_config
 from user_workflows.config.schema import WorkflowConfig
@@ -297,13 +301,14 @@ def main():
 
     calibration_paths = assert_required_calibration_files(config.calibration.paths["root"])
 
-    cam = AndorIDus(
-        serial=config.hardware.camera_serial,
-        target_temperature_c=config.hardware.cooling_target_c,
-        shutter_mode=config.hardware.shutter_mode,
+    cam = PylablibAndorCamera(
+        AndorConnectionConfig(
+            camera_serial=config.hardware.camera_serial,
+            exposure_s=config.hardware.exposure_s,
+            shutter_mode=config.hardware.shutter_mode,
+        ),
         verbose=True,
     )
-    cam.set_exposure(config.hardware.exposure_s)
 
     fs = FourierSLM(cam, slm)
     fs.load_calibration("fourier", str(calibration_paths["fourier"]))
@@ -324,9 +329,6 @@ def main():
         np.save(out, frames)
         output.register_file(out, "legacy_frame_stack")
         print(f"Saved frames to {out.resolve()}")
-
-    output.save_manifest({"calibration_root": str(Path(args.calibration_root).resolve())})
-    print(f"Run directory: {output.run_dir.resolve()}")
 
     hold_until_interrupt(slm, cam=cam)
 
