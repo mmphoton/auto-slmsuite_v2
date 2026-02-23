@@ -7,7 +7,6 @@ from pathlib import Path
 
 import numpy as np
 
-from user_workflows.calibration_io import assert_required_calibration_files
 from user_workflows.andor_camera import AndorConnectionConfig, PylablibAndorCamera
 from user_workflows.commands.pattern import build_pattern, hold_until_interrupt, load_phase_lut
 
@@ -31,27 +30,25 @@ def create_fourier_slm(args):
     )
 
     fs = FourierSLM(cam, slm)
-    calibration_paths = assert_required_calibration_files(args.calibration_root)
-    fs.load_calibration("fourier", str(calibration_paths["fourier"]))
-    fs.load_calibration("wavefront_superpixel", str(calibration_paths["wavefront_superpixel"]))
-    fs.slm.source["amplitude"] = np.load(calibration_paths["source_amplitude"])
     return fs
 
 
 def run_acquire(args):
-    lut_path = Path(args.lut_file)
-    if not lut_path.exists():
-        raise FileNotFoundError(
-            f"LUT file '{lut_path}' does not exist. Fix: provide --lut-file or run workflow doctor first."
-        )
-    deep = load_phase_lut(lut_path, args.lut_key)
-    calibration_paths = assert_required_calibration_files(args.calibration_root)
+    deep = None
+    if args.use_phase_depth_correction:
+        lut_path = Path(args.lut_file)
+        if not lut_path.exists():
+            raise FileNotFoundError(
+                f"LUT file '{lut_path}' does not exist. Fix: provide --lut-file or use --no-phase-depth-correction."
+            )
+        deep = load_phase_lut(lut_path, args.lut_key)
 
     if args.dry_run:
         print("[dry-run] acquisition inputs validated:")
-        print(f"  LUT: {lut_path.resolve()}")
-        for key, path in calibration_paths.items():
-            print(f"  calibration[{key}]: {path.resolve()}")
+        if args.use_phase_depth_correction:
+            print(f"  LUT: {lut_path.resolve()}")
+        else:
+            print("  LUT: skipped (--no-phase-depth-correction)")
         if args.save_frames:
             Path(args.save_frames).parent.mkdir(parents=True, exist_ok=True)
         return
