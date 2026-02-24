@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 
 from slmsuite.holography.algorithms import SpotHologram
