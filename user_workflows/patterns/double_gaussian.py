@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 
 from slmsuite.holography.algorithms import SpotHologram
@@ -10,7 +12,7 @@ from user_workflows.patterns.base import BasePattern, PatternResult, register_pa
 
 
 def _spot_hologram_cameraslm_arg(slm):
-    return slm if hasattr(slm, "slm") else None
+    return slm if hasattr(slm, "slm") else SimpleNamespace(slm=slm)
 
 
 @register_pattern

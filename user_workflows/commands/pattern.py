@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import scipy.io
@@ -30,16 +31,15 @@ def depth_correct(phi, deep):
     return np.mod(corrected, 2 * np.pi)
 
 
-
-
 def _spot_hologram_cameraslm_arg(slm):
     """Return a CameraSLM-compatible object for SpotHologram, if available.
 
     SpotHologram expects an object exposing ``.slm`` when ``basis="kxy"``.
-    For direct SLM objects (e.g., ``Holoeye``), pass ``None`` to avoid
-    attribute errors in slmsuite internals.
+    For direct SLM objects (e.g., ``Holoeye``), provide a tiny shim object
+    with a ``.slm`` attribute so slmsuite can still interpret kxy basis.
     """
-    return slm if hasattr(slm, "slm") else None
+    return slm if hasattr(slm, "slm") else SimpleNamespace(slm=slm)
+
 
 def build_pattern(args, slm, deep):
     from slmsuite.holography.algorithms import SpotHologram
