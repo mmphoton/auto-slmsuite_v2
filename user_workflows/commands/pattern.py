@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import scipy.io
@@ -92,6 +93,7 @@ def build_pattern(args, slm, deep):
         return depth_correct(phi, deep) if args.use_phase_depth_correction else phi
 
     shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+    cameraslm_arg = _spot_hologram_cameraslm_arg(slm)
 
     if args.pattern == "single-gaussian":
         spot_kxy = np.array([[args.single_kx], [args.single_ky]], dtype=float)
