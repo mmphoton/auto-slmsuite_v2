@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 
 from slmsuite.holography import toolbox
@@ -30,6 +32,7 @@ class DoubleGaussianPattern(BasePattern):
 
     def build(self, args, slm) -> PatternResult:
         shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+        cameraslm_arg = _spot_hologram_cameraslm_arg(slm)
         dx = float(args.double_sep_kxy) / 2.0
         spot_kxy = np.array(
             [
