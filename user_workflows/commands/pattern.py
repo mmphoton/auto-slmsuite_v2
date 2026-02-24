@@ -31,14 +31,35 @@ def depth_correct(phi, deep):
     return np.mod(corrected, 2 * np.pi)
 
 
-def _spot_hologram_cameraslm_arg(slm):
-    """Return a CameraSLM-compatible object for SpotHologram, if available.
+def _as_spot_hologram_inputs(slm, shape, spot_kxy):
+    """Return (spot_vectors, basis, cameraslm) for SpotHologram construction.
 
-    SpotHologram expects an object exposing ``.slm`` when ``basis="kxy"``.
-    For direct SLM objects (e.g., ``Holoeye``), provide a tiny shim object
-    with a ``.slm`` attribute so slmsuite can still interpret kxy basis.
+    If a CameraSLM-like object is available (has `.slm`), keep kxy basis.
+    Otherwise convert user kxy vectors to knm using the raw SLM hardware so
+    SpotHologram does not require CameraSLM-only metadata.
     """
-    return slm if hasattr(slm, "slm") else SimpleNamespace(slm=slm)
+    from slmsuite.holography import toolbox
+
+    if hasattr(slm, "slm"):
+        return np.asarray(spot_kxy, dtype=float), "kxy", slm
+
+    spot_knm = toolbox.convert_vector(
+        np.asarray(spot_kxy, dtype=float),
+        from_units="kxy",
+        to_units="knm",
+        hardware=slm,
+        shape=shape,
+    )
+    return np.asarray(spot_knm, dtype=float), "knm", None
+
+
+def _build_lattice_spot_kxy(args):
+    x_offsets = (np.arange(int(args.lattice_nx), dtype=float) - 0.5 * (int(args.lattice_nx) - 1.0)) * float(args.lattice_pitch_x)
+    y_offsets = (np.arange(int(args.lattice_ny), dtype=float) - 0.5 * (int(args.lattice_ny) - 1.0)) * float(args.lattice_pitch_y)
+    xx, yy = np.meshgrid(x_offsets, y_offsets, indexing="xy")
+    x = xx.ravel() + float(args.lattice_center_kx)
+    y = yy.ravel() + float(args.lattice_center_ky)
+    return np.vstack((x, y))
 
 
 def build_pattern(args, slm, deep):
@@ -55,27 +76,23 @@ def build_pattern(args, slm, deep):
     cameraslm_arg = _spot_hologram_cameraslm_arg(slm)
 
     if args.pattern == "single-gaussian":
-        spot_kxy = np.array([[args.single_kx], [args.single_ky]])
-        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=cameraslm_arg)
+        spot_kxy = np.array([[args.single_kx], [args.single_ky]], dtype=float)
     elif args.pattern == "double-gaussian":
         dx = float(args.double_sep_kxy) / 2.0
-        spot_kxy = np.array([
-            [args.double_center_kx - dx, args.double_center_kx + dx],
-            [args.double_center_ky, args.double_center_ky],
-        ])
-        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=cameraslm_arg)
-    elif args.pattern == "gaussian-lattice":
-        hologram = SpotHologram.make_rectangular_array(
-            shape,
-            array_shape=(args.lattice_nx, args.lattice_ny),
-            array_pitch=(args.lattice_pitch_x, args.lattice_pitch_y),
-            array_center=(args.lattice_center_kx, args.lattice_center_ky),
-            basis="kxy",
-            cameraslm=cameraslm_arg,
+        spot_kxy = np.array(
+            [
+                [args.double_center_kx - dx, args.double_center_kx + dx],
+                [args.double_center_ky, args.double_center_ky],
+            ],
+            dtype=float,
         )
+    elif args.pattern == "gaussian-lattice":
+        spot_kxy = _build_lattice_spot_kxy(args)
     else:
         raise ValueError(f"Unknown pattern '{args.pattern}'")
 
+    spot_vectors, basis, cameraslm_arg = _as_spot_hologram_inputs(slm, shape, spot_kxy)
+    hologram = SpotHologram(shape, spot_vectors=spot_vectors, basis=basis, cameraslm=cameraslm_arg)
     hologram.optimize(method=args.holo_method, maxiter=args.holo_maxiter, feedback="computational", stat_groups=["computational"])
     phi = np.mod(hologram.get_phase(), 2 * np.pi)
     return depth_correct(phi, deep) if args.use_phase_depth_correction else phi

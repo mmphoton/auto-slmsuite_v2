@@ -6,13 +6,24 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from slmsuite.holography import toolbox
 from slmsuite.holography.algorithms import SpotHologram
 
 from user_workflows.patterns.base import BasePattern, PatternResult, register_pattern
 
 
-def _spot_hologram_cameraslm_arg(slm):
-    return slm if hasattr(slm, "slm") else SimpleNamespace(slm=slm)
+def _spot_inputs_from_kxy(slm, shape, spot_kxy):
+    if hasattr(slm, "slm"):
+        return np.asarray(spot_kxy, dtype=float), "kxy", slm
+
+    spot_knm = toolbox.convert_vector(
+        np.asarray(spot_kxy, dtype=float),
+        from_units="kxy",
+        to_units="knm",
+        hardware=slm,
+        shape=shape,
+    )
+    return np.asarray(spot_knm, dtype=float), "knm", None
 
 
 @register_pattern
@@ -27,9 +38,11 @@ class DoubleGaussianPattern(BasePattern):
             [
                 [args.double_center_kx - dx, args.double_center_kx + dx],
                 [args.double_center_ky, args.double_center_ky],
-            ]
+            ],
+            dtype=float,
         )
-        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=cameraslm_arg)
+        spot_vectors, basis, cameraslm = _spot_inputs_from_kxy(slm, shape, spot_kxy)
+        hologram = SpotHologram(shape, spot_vectors=spot_vectors, basis=basis, cameraslm=cameraslm)
         hologram.optimize(
             method=args.holo_method,
             maxiter=args.holo_maxiter,

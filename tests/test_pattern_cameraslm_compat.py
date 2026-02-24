@@ -1,15 +1,36 @@
 from types import SimpleNamespace
 
-from user_workflows.commands.pattern import _spot_hologram_cameraslm_arg
+import numpy as np
+
+from user_workflows.commands.pattern import _build_lattice_spot_kxy
 
 
-def test_spot_hologram_wraps_raw_slm_objects_in_shim():
-    raw_slm = SimpleNamespace(shape=(1080, 1920))
-    shim = _spot_hologram_cameraslm_arg(raw_slm)
-    assert hasattr(shim, "slm")
-    assert shim.slm is raw_slm
+def test_lattice_builder_returns_expected_shape_and_center():
+    args = SimpleNamespace(
+        lattice_nx=5,
+        lattice_ny=5,
+        lattice_pitch_x=0.01,
+        lattice_pitch_y=0.02,
+        lattice_center_kx=0.005,
+        lattice_center_ky=-0.004,
+    )
+    spots = _build_lattice_spot_kxy(args)
+    assert spots.shape == (2, 25)
+    assert np.isclose(spots[0].mean(), args.lattice_center_kx)
+    assert np.isclose(spots[1].mean(), args.lattice_center_ky)
 
 
-def test_spot_hologram_uses_cameraslm_when_available():
-    camera_slm = SimpleNamespace(slm=SimpleNamespace(shape=(1080, 1920)))
-    assert _spot_hologram_cameraslm_arg(camera_slm) is camera_slm
+def test_lattice_builder_contains_expected_edge_coordinates():
+    args = SimpleNamespace(
+        lattice_nx=3,
+        lattice_ny=3,
+        lattice_pitch_x=0.01,
+        lattice_pitch_y=0.01,
+        lattice_center_kx=0.0,
+        lattice_center_ky=0.0,
+    )
+    spots = _build_lattice_spot_kxy(args)
+    xs = np.unique(np.round(spots[0], 6))
+    ys = np.unique(np.round(spots[1], 6))
+    assert np.allclose(xs, np.array([-0.01, 0.0, 0.01]))
+    assert np.allclose(ys, np.array([-0.01, 0.0, 0.01]))
