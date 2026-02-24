@@ -117,3 +117,9 @@ python user_workflows/run_slm_andor.py --help
 
 ## SDK/HEDS bootstrap helper
 To locate repo + HEDS SDK paths programmatically (matching your requested setup), use `user_workflows.bootstrap.bootstrap_runtime(...)` before creating hardware objects.
+
+
+If Holoeye import fails with `SDK HEDS not installed`, pass explicit bootstrap roots on the same CLI call:
+```bash
+python user_workflows/cli.py workflow acquire   --repo-root "C:\Users\admin\Desktop\SLM_Python\v4\auto-slmsuite_v2-main"   --sdk-root "C:\Program Files\HOLOEYE Photonics\SLM Display SDK (Python) v4.1.0"   --pattern laguerre-gaussian   --lg-l 9   --lg-p 0
+```
