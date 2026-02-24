@@ -106,7 +106,7 @@ def run(args):
             method="WGS-Kim",
             feedback="experimental",
             maxiter=int(args.feedback_iters),
-            stat_groups=["experimental_ij", "computational"],
+            stat_groups=["experimental", "computational"],
         )
 
         corrected = np.mod(feedback.get_phase(include_propagation=True), 2 * np.pi)
