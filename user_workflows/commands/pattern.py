@@ -30,6 +30,17 @@ def depth_correct(phi, deep):
     return np.mod(corrected, 2 * np.pi)
 
 
+
+
+def _spot_hologram_cameraslm_arg(slm):
+    """Return a CameraSLM-compatible object for SpotHologram, if available.
+
+    SpotHologram expects an object exposing ``.slm`` when ``basis="kxy"``.
+    For direct SLM objects (e.g., ``Holoeye``), pass ``None`` to avoid
+    attribute errors in slmsuite internals.
+    """
+    return slm if hasattr(slm, "slm") else None
+
 def build_pattern(args, slm, deep):
     from slmsuite.holography.algorithms import SpotHologram
     from slmsuite.holography.toolbox import phase
@@ -41,17 +52,18 @@ def build_pattern(args, slm, deep):
         return depth_correct(phi, deep) if args.use_phase_depth_correction else phi
 
     shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+    cameraslm_arg = _spot_hologram_cameraslm_arg(slm)
 
     if args.pattern == "single-gaussian":
         spot_kxy = np.array([[args.single_kx], [args.single_ky]])
-        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
+        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=cameraslm_arg)
     elif args.pattern == "double-gaussian":
         dx = float(args.double_sep_kxy) / 2.0
         spot_kxy = np.array([
             [args.double_center_kx - dx, args.double_center_kx + dx],
             [args.double_center_ky, args.double_center_ky],
         ])
-        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
+        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=cameraslm_arg)
     elif args.pattern == "gaussian-lattice":
         hologram = SpotHologram.make_rectangular_array(
             shape,
@@ -59,7 +71,7 @@ def build_pattern(args, slm, deep):
             array_pitch=(args.lattice_pitch_x, args.lattice_pitch_y),
             array_center=(args.lattice_center_kx, args.lattice_center_ky),
             basis="kxy",
-            cameraslm=slm,
+            cameraslm=cameraslm_arg,
         )
     else:
         raise ValueError(f"Unknown pattern '{args.pattern}'")
