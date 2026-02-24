@@ -57,6 +57,24 @@ python user_workflows/cli.py workflow feedback \
   --double-sep-kxy 0.03
 ```
 
+
+### 4b) Pattern-specific WGS (Andor camera, calibrated FourierSLM)
+Use the `feedback` workflow after calibration artifacts exist under `user_workflows/calibrations` (or pass `--calibration-root`).
+
+```bash
+# Single Gaussian
+python user_workflows/cli.py workflow feedback   --pattern single-gaussian   --single-kx 0.00 --single-ky 0.01   --feedback-iters 30
+
+# Double Gaussian
+python user_workflows/cli.py workflow feedback   --pattern double-gaussian   --double-center-kx 0.00 --double-center-ky 0.00   --double-sep-kxy 0.03   --feedback-iters 30
+
+# Gaussian lattice
+python user_workflows/cli.py workflow feedback   --pattern gaussian-lattice   --lattice-nx 5 --lattice-ny 5   --lattice-pitch-x 0.01 --lattice-pitch-y 0.01   --feedback-iters 30
+
+# Laguerre-Gaussian mode
+python user_workflows/cli.py workflow feedback   --pattern laguerre-gaussian   --lg-l 2 --lg-p 1   --feedback-iters 30
+```
+
 ### 5) Direct calibration script
 ```bash
 python user_workflows/run_calibration.py \
