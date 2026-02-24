@@ -4,9 +4,36 @@ from __future__ import annotations
 
 import numpy as np
 
+from slmsuite.holography import toolbox
 from slmsuite.holography.algorithms import SpotHologram
 
 from user_workflows.patterns.base import BasePattern, PatternResult, register_pattern
+
+
+def _spot_inputs_from_kxy(slm, shape, spot_kxy):
+    if hasattr(slm, "slm"):
+        return np.asarray(spot_kxy, dtype=float), "kxy", slm
+
+    spot_knm = toolbox.convert_vector(
+        np.asarray(spot_kxy, dtype=float),
+        from_units="kxy",
+        to_units="knm",
+        hardware=slm,
+        shape=shape,
+    )
+    return np.asarray(spot_knm, dtype=float), "knm", None
+
+
+def _spot_hologram_shape(slm):
+    """Use native SLM resolution for display-compatible phase arrays."""
+    return tuple(int(v) for v in slm.shape)
+
+
+def _build_lattice_spot_kxy(args):
+    x_offsets = (np.arange(int(args.lattice_nx), dtype=float) - 0.5 * (int(args.lattice_nx) - 1.0)) * float(args.lattice_pitch_x)
+    y_offsets = (np.arange(int(args.lattice_ny), dtype=float) - 0.5 * (int(args.lattice_ny) - 1.0)) * float(args.lattice_pitch_y)
+    xx, yy = np.meshgrid(x_offsets, y_offsets, indexing="xy")
+    return np.vstack((xx.ravel() + float(args.lattice_center_kx), yy.ravel() + float(args.lattice_center_ky)))
 
 
 @register_pattern
@@ -14,15 +41,10 @@ class GaussianLatticePattern(BasePattern):
     name = "gaussian-lattice"
 
     def build(self, args, slm) -> PatternResult:
-        shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
-        hologram = SpotHologram.make_rectangular_array(
-            shape,
-            array_shape=(args.lattice_nx, args.lattice_ny),
-            array_pitch=(args.lattice_pitch_x, args.lattice_pitch_y),
-            array_center=(args.lattice_center_kx, args.lattice_center_ky),
-            basis="kxy",
-            cameraslm=slm,
-        )
+        shape = _spot_hologram_shape(slm)
+        spot_kxy = _build_lattice_spot_kxy(args)
+        spot_vectors, basis, cameraslm = _spot_inputs_from_kxy(slm, shape, spot_kxy)
+        hologram = SpotHologram(shape, spot_vectors=spot_vectors, basis=basis, cameraslm=cameraslm)
         hologram.optimize(
             method=args.holo_method,
             maxiter=args.holo_maxiter,
