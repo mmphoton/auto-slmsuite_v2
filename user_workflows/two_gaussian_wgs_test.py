@@ -31,6 +31,19 @@ def _hold_until_interrupt(slm, cam=None):
         slm.close()
 
 
+def _compute_spot_knm(shape, args):
+    """Return 2xN knm spot array using center offsets relative to FFT center."""
+    half_sep = float(args.separation_knm) / 2.0
+    center_x = (float(shape[1]) / 2.0) + float(args.center_knm_x)
+    center_y = (float(shape[0]) / 2.0) + float(args.center_knm_y)
+    return np.array(
+        [
+            [center_x - half_sep, center_x + half_sep],
+            [center_y, center_y],
+        ]
+    )
+
+
 def _build_two_spot_phase(args, slm):
     """Build two-spot phase using SpotHologram in SLM-only coordinates.
 
@@ -40,13 +53,7 @@ def _build_two_spot_phase(args, slm):
     from slmsuite.holography.algorithms import SpotHologram
 
     shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
-    half_sep = float(args.separation_knm) / 2.0
-    spot_knm = np.array(
-        [
-            [args.center_knm_x - half_sep, args.center_knm_x + half_sep],
-            [args.center_knm_y, args.center_knm_y],
-        ]
-    )
+    spot_knm = _compute_spot_knm(shape, args)
     hologram = SpotHologram(shape, spot_vectors=spot_knm, basis="knm", cameraslm=None)
     hologram.optimize(method=args.holo_method, maxiter=args.holo_maxiter, feedback="computational")
     return np.mod(hologram.get_phase(), 2 * np.pi)
@@ -121,8 +128,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-phase-depth-correction", dest="use_phase_depth_correction", action="store_false")
 
     parser.add_argument("--radius-hint-px", type=float, default=25.0, help="Operator note for desired spot radius.")
-    parser.add_argument("--center-knm-x", type=float, default=0.0, help="Center x in knm basis.")
-    parser.add_argument("--center-knm-y", type=float, default=0.0, help="Center y in knm basis.")
+    parser.add_argument("--center-knm-x", type=float, default=0.0, help="X offset from FFT center in knm basis.")
+    parser.add_argument("--center-knm-y", type=float, default=0.0, help="Y offset from FFT center in knm basis.")
     parser.add_argument("--separation-knm", type=float, default=30.0, help="Spot separation in knm basis.")
 
     parser.add_argument(
