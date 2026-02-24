@@ -30,6 +30,16 @@ python user_workflows/cli.py workflow pattern \
   --single-ky 0.01
 ```
 
+To generate a 5x5 Gaussian spot array with a diagonal shift/carrier of `(0.005, 0.005)`:
+```bash
+python user_workflows/cli.py workflow pattern \
+  --pattern gaussian-lattice \
+  --lattice-nx 5 \
+  --lattice-ny 5 \
+  --blaze-kx 0.005 \
+  --blaze-ky 0.005
+```
+
 ### 3) Camera acquisition workflow (via unified CLI)
 ```bash
 python user_workflows/cli.py workflow acquire \

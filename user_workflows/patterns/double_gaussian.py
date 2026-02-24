@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 
 from slmsuite.holography.algorithms import SpotHologram
 
 from user_workflows.patterns.base import BasePattern, PatternResult, register_pattern
+
+
+def _spot_hologram_cameraslm_arg(slm):
+    return slm if hasattr(slm, "slm") else SimpleNamespace(slm=slm)
 
 
 @register_pattern
@@ -15,6 +21,7 @@ class DoubleGaussianPattern(BasePattern):
 
     def build(self, args, slm) -> PatternResult:
         shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+        cameraslm_arg = _spot_hologram_cameraslm_arg(slm)
         dx = float(args.double_sep_kxy) / 2.0
         spot_kxy = np.array(
             [
@@ -22,7 +29,7 @@ class DoubleGaussianPattern(BasePattern):
                 [args.double_center_ky, args.double_center_ky],
             ]
         )
-        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
+        hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=cameraslm_arg)
         hologram.optimize(
             method=args.holo_method,
             maxiter=args.holo_maxiter,
