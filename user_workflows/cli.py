@@ -15,12 +15,15 @@ from user_workflows.commands.doctor import add_doctor_args, run_doctor
 from user_workflows.commands.feedback import add_feedback_args, run_feedback
 from user_workflows.commands.pattern import add_pattern_args, run_pattern
 from user_workflows.commands.presets import apply_preset
+from user_workflows.bootstrap import bootstrap_runtime
 
 
 def add_common_profile_args(parser: argparse.ArgumentParser):
     parser.add_argument("--preset", default="", help="Preset profile name to load")
     parser.add_argument("--preset-file", default="user_workflows/presets.json", help="JSON file that defines profiles")
     parser.add_argument("--dry-run", action="store_true", help="Validate config and paths without touching hardware")
+    parser.add_argument("--repo-root", default=None, help="Optional repo root for runtime bootstrap")
+    parser.add_argument("--sdk-root", default=None, help="Optional Holoeye SDK root for runtime bootstrap")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,6 +68,7 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
     args = apply_preset(args, parser)
+    bootstrap_runtime(repo_root=getattr(args, "repo_root", None), sdk_root=getattr(args, "sdk_root", None))
     args.handler(args)
 
 

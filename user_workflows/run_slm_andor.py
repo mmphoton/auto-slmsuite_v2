@@ -167,7 +167,7 @@ def run_feedback(fs: FourierSLM, method: str, iterations: int):
         method=method,
         feedback="experimental",
         maxiter=int(iterations),
-        stat_groups=["experimental_ij", "computational"],
+        stat_groups=["experimental", "computational"],
     )
     fs.slm.set_phase(holo.get_phase(include_propagation=True), settle=True)
 

@@ -65,6 +65,19 @@ python user_workflows/run_slm_andor.py \
   --lg-p 1
 ```
 
+### 7) Two-Gaussian setup validation script (optional experimental WGS)
+```bash
+python user_workflows/two_gaussian_wgs_test.py \
+  --lut-file deep_1024.mat \
+  --separation-knm 30 \
+  --blaze-k 0.003 \
+  --run-experimental-wgs
+```
+
+Use `--no-phase-depth-correction` to generate/display patterns without loading LUT or other calibration files.
+
+Note: this script uses SLM-only `knm` coordinates (`--center-knm-x`, `--center-knm-y`, `--separation-knm`) so it runs without a camera wrapper during initial display; center values are offsets from the FFT center (0,0 by default), and the generated phase uses native SLM resolution for compatibility with blaze addition.
+
 ## Spyder troubleshooting note
 If launching from Spyder, make sure you are executing from the **project root** and that the repo root is on `sys.path`; otherwise imports like `user_workflows.*` may fail.
 
@@ -100,4 +113,13 @@ assert_required_calibration_files("user_workflows/calibrations")
 python user_workflows/cli.py --help
 python user_workflows/run_calibration.py --help
 python user_workflows/run_slm_andor.py --help
+```
+
+## SDK/HEDS bootstrap helper
+To locate repo + HEDS SDK paths programmatically (matching your requested setup), use `user_workflows.bootstrap.bootstrap_runtime(...)` before creating hardware objects.
+
+
+If Holoeye import fails with `SDK HEDS not installed`, pass explicit bootstrap roots on the same CLI call:
+```bash
+python user_workflows/cli.py workflow acquire   --repo-root "C:\Users\admin\Desktop\SLM_Python\v4\auto-slmsuite_v2-main"   --sdk-root "C:\Program Files\HOLOEYE Photonics\SLM Display SDK (Python) v4.1.0"   --pattern laguerre-gaussian   --lg-l 9   --lg-p 0
 ```
