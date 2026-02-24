@@ -9,19 +9,24 @@ from slmsuite.holography.algorithms import SpotHologram
 from user_workflows.patterns.base import BasePattern, PatternResult, register_pattern
 
 
+def _spot_hologram_cameraslm_arg(slm):
+    return slm if hasattr(slm, "slm") else None
+
+
 @register_pattern
 class GaussianLatticePattern(BasePattern):
     name = "gaussian-lattice"
 
     def build(self, args, slm) -> PatternResult:
         shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+        cameraslm_arg = _spot_hologram_cameraslm_arg(slm)
         hologram = SpotHologram.make_rectangular_array(
             shape,
             array_shape=(args.lattice_nx, args.lattice_ny),
             array_pitch=(args.lattice_pitch_x, args.lattice_pitch_y),
             array_center=(args.lattice_center_kx, args.lattice_center_ky),
             basis="kxy",
-            cameraslm=slm,
+            cameraslm=cameraslm_arg,
         )
         hologram.optimize(
             method=args.holo_method,

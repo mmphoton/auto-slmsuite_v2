@@ -11,6 +11,10 @@ from slmsuite.holography.toolbox.phase import blaze
 from user_workflows.patterns.registry import register_pattern
 
 
+def _spot_hologram_cameraslm_arg(slm):
+    return slm if hasattr(slm, "slm") else None
+
+
 @register_pattern(name="laguerre-gaussian")
 def laguerre_gaussian(config, slm, deep, depth_correct):
     args = config.args
@@ -35,8 +39,9 @@ def _optimize_spot_hologram(config, slm, deep, hologram, depth_correct):
 def single_gaussian(config, slm, deep, depth_correct):
     args = config.args
     shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+    cameraslm_arg = _spot_hologram_cameraslm_arg(slm)
     spot_kxy = np.array([[args.single_kx], [args.single_ky]])
-    hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
+    hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=cameraslm_arg)
     return _optimize_spot_hologram(config, slm, deep, hologram, depth_correct)
 
 
@@ -44,6 +49,7 @@ def single_gaussian(config, slm, deep, depth_correct):
 def double_gaussian(config, slm, deep, depth_correct):
     args = config.args
     shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+    cameraslm_arg = _spot_hologram_cameraslm_arg(slm)
     dx = float(args.double_sep_kxy) / 2.0
     spot_kxy = np.array(
         [
@@ -51,7 +57,7 @@ def double_gaussian(config, slm, deep, depth_correct):
             [args.double_center_ky, args.double_center_ky],
         ]
     )
-    hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=slm)
+    hologram = SpotHologram(shape, spot_vectors=spot_kxy, basis="kxy", cameraslm=cameraslm_arg)
     return _optimize_spot_hologram(config, slm, deep, hologram, depth_correct)
 
 
@@ -59,12 +65,13 @@ def double_gaussian(config, slm, deep, depth_correct):
 def gaussian_lattice(config, slm, deep, depth_correct):
     args = config.args
     shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+    cameraslm_arg = _spot_hologram_cameraslm_arg(slm)
     hologram = SpotHologram.make_rectangular_array(
         shape,
         array_shape=(args.lattice_nx, args.lattice_ny),
         array_pitch=(args.lattice_pitch_x, args.lattice_pitch_y),
         array_center=(args.lattice_center_kx, args.lattice_center_ky),
         basis="kxy",
-        cameraslm=slm,
+        cameraslm=cameraslm_arg,
     )
     return _optimize_spot_hologram(config, slm, deep, hologram, depth_correct)
