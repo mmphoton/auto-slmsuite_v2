@@ -31,6 +31,25 @@ def depth_correct(phi, deep):
     return np.mod(corrected, 2 * np.pi)
 
 
+
+
+class _SpotHologramHardwareShim:
+    """Back-compat proxy exposing both SLM-like and CameraSLM-like attributes."""
+
+    def __init__(self, slm):
+        self.slm = slm
+        if hasattr(slm, "pitch"):
+            self.pitch = slm.pitch
+
+    def __getattr__(self, name):
+        return getattr(self.slm, name)
+
+
+def _spot_hologram_cameraslm_arg(slm):
+    """Deprecated helper kept for backward compatibility with older call sites."""
+    return slm if hasattr(slm, "slm") else _SpotHologramHardwareShim(slm)
+
+
 def _as_spot_hologram_inputs(slm, shape, spot_kxy):
     """Return (spot_vectors, basis, cameraslm) for SpotHologram construction.
 
@@ -40,8 +59,9 @@ def _as_spot_hologram_inputs(slm, shape, spot_kxy):
     """
     from slmsuite.holography import toolbox
 
+    cameraslm_arg = _spot_hologram_cameraslm_arg(slm)
     if hasattr(slm, "slm"):
-        return np.asarray(spot_kxy, dtype=float), "kxy", slm
+        return np.asarray(spot_kxy, dtype=float), "kxy", cameraslm_arg
 
     spot_knm = toolbox.convert_vector(
         np.asarray(spot_kxy, dtype=float),

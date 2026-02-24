@@ -2,7 +2,10 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from user_workflows.commands.pattern import _build_lattice_spot_kxy
+from user_workflows.commands.pattern import (
+    _build_lattice_spot_kxy,
+    _spot_hologram_cameraslm_arg,
+)
 
 
 def test_lattice_builder_returns_expected_shape_and_center():
@@ -34,3 +37,15 @@ def test_lattice_builder_contains_expected_edge_coordinates():
     ys = np.unique(np.round(spots[1], 6))
     assert np.allclose(xs, np.array([-0.01, 0.0, 0.01]))
     assert np.allclose(ys, np.array([-0.01, 0.0, 0.01]))
+
+
+def test_deprecated_cameraslm_helper_wraps_raw_slm_with_pitch():
+    raw_slm = SimpleNamespace(pitch=(8e-6, 8e-6), shape=(1080, 1920))
+    wrapped = _spot_hologram_cameraslm_arg(raw_slm)
+    assert wrapped.slm is raw_slm
+    assert wrapped.pitch == raw_slm.pitch
+
+
+def test_deprecated_cameraslm_helper_passthrough_for_cameraslm():
+    camera_slm = SimpleNamespace(slm=SimpleNamespace(pitch=(8e-6, 8e-6)))
+    assert _spot_hologram_cameraslm_arg(camera_slm) is camera_slm
