@@ -76,7 +76,7 @@ python user_workflows/two_gaussian_wgs_test.py \
 
 Use `--no-phase-depth-correction` to generate/display patterns without loading LUT or other calibration files.
 
-Note: this script uses SLM-only `knm` coordinates (`--center-knm-x`, `--center-knm-y`, `--separation-knm`) so it runs without a camera wrapper during initial display; center values are offsets from the FFT center (0,0 by default).
+Note: this script uses SLM-only `knm` coordinates (`--center-knm-x`, `--center-knm-y`, `--separation-knm`) so it runs without a camera wrapper during initial display; center values are offsets from the FFT center (0,0 by default), and the generated phase uses native SLM resolution for compatibility with blaze addition.
 
 ## Spyder troubleshooting note
 If launching from Spyder, make sure you are executing from the **project root** and that the repo root is on `sys.path`; otherwise imports like `user_workflows.*` may fail.

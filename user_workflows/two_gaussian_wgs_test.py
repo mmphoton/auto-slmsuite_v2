@@ -52,7 +52,8 @@ def _build_two_spot_phase(args, slm):
     """
     from slmsuite.holography.algorithms import SpotHologram
 
-    shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+    # Use native SLM shape so blaze and hologram phase arrays are broadcast-compatible.
+    shape = tuple(int(v) for v in slm.shape)
     spot_knm = _compute_spot_knm(shape, args)
     hologram = SpotHologram(shape, spot_vectors=spot_knm, basis="knm", cameraslm=None)
     hologram.optimize(method=args.holo_method, maxiter=args.holo_maxiter, feedback="computational")
