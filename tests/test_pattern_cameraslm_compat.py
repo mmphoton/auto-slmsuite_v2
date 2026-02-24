@@ -5,7 +5,13 @@ import numpy as np
 from user_workflows.commands.pattern import (
     _build_lattice_spot_kxy,
     _spot_hologram_cameraslm_arg,
+    _spot_hologram_shape,
 )
+
+
+def test_spot_hologram_shape_matches_native_slm_shape():
+    raw_slm = SimpleNamespace(shape=(1080, 1920))
+    assert _spot_hologram_shape(raw_slm) == (1080, 1920)
 
 
 def test_lattice_builder_returns_expected_shape_and_center():

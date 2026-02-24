@@ -28,6 +28,11 @@ def _spot_inputs_from_kxy(slm, shape, spot_kxy):
     return np.asarray(spot_knm, dtype=float), "knm", None
 
 
+def _spot_hologram_shape(slm):
+    """Use native SLM resolution for display-compatible phase arrays."""
+    return tuple(int(v) for v in slm.shape)
+
+
 def _build_lattice_spot_kxy(args):
     x_offsets = (np.arange(int(args.lattice_nx), dtype=float) - 0.5 * (int(args.lattice_nx) - 1.0)) * float(args.lattice_pitch_x)
     y_offsets = (np.arange(int(args.lattice_ny), dtype=float) - 0.5 * (int(args.lattice_ny) - 1.0)) * float(args.lattice_pitch_y)
@@ -45,7 +50,7 @@ def laguerre_gaussian(config, slm, deep, depth_correct):
 
 def _optimize_spot_hologram(config, slm, deep, spot_kxy, depth_correct):
     args = config.args
-    shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+    shape = _spot_hologram_shape(slm)
     spot_vectors, basis, cameraslm = _spot_inputs_from_kxy(slm, shape, spot_kxy)
     hologram = SpotHologram(shape, spot_vectors=spot_vectors, basis=basis, cameraslm=cameraslm)
     hologram.optimize(

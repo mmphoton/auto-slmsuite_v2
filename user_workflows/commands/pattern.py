@@ -73,6 +73,11 @@ def _as_spot_hologram_inputs(slm, shape, spot_kxy):
     return np.asarray(spot_knm, dtype=float), "knm", None
 
 
+def _spot_hologram_shape(slm):
+    """Use native SLM resolution for display-compatible phase arrays."""
+    return tuple(int(v) for v in slm.shape)
+
+
 def _build_lattice_spot_kxy(args):
     x_offsets = (np.arange(int(args.lattice_nx), dtype=float) - 0.5 * (int(args.lattice_nx) - 1.0)) * float(args.lattice_pitch_x)
     y_offsets = (np.arange(int(args.lattice_ny), dtype=float) - 0.5 * (int(args.lattice_ny) - 1.0)) * float(args.lattice_pitch_y)
@@ -92,8 +97,7 @@ def build_pattern(args, slm, deep):
         phi = np.mod(lg_phase + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
         return depth_correct(phi, deep) if args.use_phase_depth_correction else phi
 
-    shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
-    cameraslm_arg = _spot_hologram_cameraslm_arg(slm)
+    shape = _spot_hologram_shape(slm)
 
     if args.pattern == "single-gaussian":
         spot_kxy = np.array([[args.single_kx], [args.single_ky]], dtype=float)

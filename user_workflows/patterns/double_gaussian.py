@@ -26,13 +26,17 @@ def _spot_inputs_from_kxy(slm, shape, spot_kxy):
     return np.asarray(spot_knm, dtype=float), "knm", None
 
 
+def _spot_hologram_shape(slm):
+    """Use native SLM resolution for display-compatible phase arrays."""
+    return tuple(int(v) for v in slm.shape)
+
+
 @register_pattern
 class DoubleGaussianPattern(BasePattern):
     name = "double-gaussian"
 
     def build(self, args, slm) -> PatternResult:
-        shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
-        cameraslm_arg = _spot_hologram_cameraslm_arg(slm)
+        shape = _spot_hologram_shape(slm)
         dx = float(args.double_sep_kxy) / 2.0
         spot_kxy = np.array(
             [

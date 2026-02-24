@@ -26,12 +26,17 @@ def _spot_inputs_from_kxy(slm, shape, spot_kxy):
     return np.asarray(spot_knm, dtype=float), "knm", None
 
 
+def _spot_hologram_shape(slm):
+    """Use native SLM resolution for display-compatible phase arrays."""
+    return tuple(int(v) for v in slm.shape)
+
+
 @register_pattern
 class SingleGaussianPattern(BasePattern):
     name = "single-gaussian"
 
     def build(self, args, slm) -> PatternResult:
-        shape = SpotHologram.get_padded_shape(slm, padding_order=1, square_padding=True)
+        shape = _spot_hologram_shape(slm)
         spot_kxy = np.array([[args.single_kx], [args.single_ky]], dtype=float)
         spot_vectors, basis, cameraslm = _spot_inputs_from_kxy(slm, shape, spot_kxy)
         hologram = SpotHologram(shape, spot_vectors=spot_vectors, basis=basis, cameraslm=cameraslm)
