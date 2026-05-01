@@ -96,7 +96,7 @@ def build_pattern(config: WorkflowConfig, slm, deep):
         feedback="computational",
         stat_groups=["computational"],
     )
-    phi = np.mod(hologram.get_phase(), 2 * np.pi)
+    phi = np.mod(hologram.get_phase() + blaze(grid=slm, vector=(params["blaze_kx"], params["blaze_ky"])), 2 * np.pi)
     corrected_phase = _depth_correct(phi, deep)
 
     expected_farfield = None

@@ -59,7 +59,10 @@ def _optimize_spot_hologram(config, slm, deep, spot_kxy, depth_correct):
         feedback="computational",
         stat_groups=["computational"],
     )
-    phi = np.mod(hologram.get_phase(), 2 * np.pi)
+    phi = np.mod(
+        hologram.get_phase() + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)),
+        2 * np.pi,
+    )
     return depth_correct(phi, deep)
 
 
