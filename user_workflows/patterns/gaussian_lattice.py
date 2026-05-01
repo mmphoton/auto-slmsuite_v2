@@ -8,6 +8,7 @@ import numpy as np
 
 from slmsuite.holography import toolbox
 from slmsuite.holography.algorithms import SpotHologram
+from slmsuite.holography.toolbox.phase import blaze
 
 from user_workflows.patterns.base import BasePattern, PatternResult, register_pattern
 
@@ -53,7 +54,10 @@ class GaussianLatticePattern(BasePattern):
             feedback="computational",
             stat_groups=["computational"],
         )
-        phase = np.mod(hologram.get_phase(), 2 * np.pi)
+        phase = np.mod(
+            hologram.get_phase() + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)),
+            2 * np.pi,
+        )
         return PatternResult(
             phase=phase,
             metadata={
