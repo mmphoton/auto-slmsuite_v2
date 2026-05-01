@@ -118,7 +118,10 @@ def build_pattern(args, slm, deep):
     spot_vectors, basis, cameraslm_arg = _as_spot_hologram_inputs(slm, shape, spot_kxy)
     hologram = SpotHologram(shape, spot_vectors=spot_vectors, basis=basis, cameraslm=cameraslm_arg)
     hologram.optimize(method=args.holo_method, maxiter=args.holo_maxiter, feedback="computational", stat_groups=["computational"])
-    phi = np.mod(hologram.get_phase(), 2 * np.pi)
+    # Apply an optional global blaze to all non-LG spot families as well.
+    # This keeps CLI behavior consistent when users set --blaze-kx/--blaze-ky
+    # expecting a first-order offset independent of the selected family.
+    phi = np.mod(hologram.get_phase() + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
     return depth_correct(phi, deep) if args.use_phase_depth_correction else phi
 
 
