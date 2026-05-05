@@ -33,6 +33,8 @@ python user_workflows/cli.py workflow pattern \
   --single-ky 0.01 \
   --single-radius-kxy 0.003 \
   --spot-radius-points 16 \
+  --holo-method WGS-Kim \
+  --holo-maxiter 30 \
   --blaze-kx 0.0 \
   --blaze-ky 0.02
 ```
@@ -46,6 +48,8 @@ python user_workflows/cli.py workflow pattern \
   --double-sep-kxy 0.03 \
   --double-radius-kxy 0.004 \
   --spot-radius-points 16 \
+  --holo-method WGS-Kim \
+  --holo-maxiter 30 \
   --blaze-kx 0.0 \
   --blaze-ky 0.02
 ```
@@ -60,6 +64,8 @@ python user_workflows/cli.py workflow pattern \
   --lattice-pitch-y 0.01 \
   --lattice-radius-kxy 0.003 \
   --spot-radius-points 16 \
+  --holo-method WGS-Kim \
+  --holo-maxiter 30 \
   --blaze-kx 0.0 \
   --blaze-ky 0.02
 ```
@@ -71,9 +77,12 @@ python user_workflows/cli.py workflow pattern \
   --lg-l 4 \
   --lg-p 1 \
   --lg-radius-w 0.30 \
+  --holo-method WGS-Kim \
+  --holo-maxiter 30 \
   --blaze-kx 0.0 \
   --blaze-ky 0.02
 ```
+Note: `--holo-method/--holo-maxiter` are consumed by SpotHologram-based families (single/double/lattice). The Laguerre-Gaussian path is generated analytically.
 
 ### 3) Camera acquisition workflow (via unified CLI)
 ```bash
