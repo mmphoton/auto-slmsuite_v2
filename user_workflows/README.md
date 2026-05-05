@@ -54,7 +54,11 @@ python user_workflows/cli.py workflow feedback \
   --pattern double-gaussian \
   --double-center-kx 0.00 \
   --double-center-ky 0.00 \
-  --double-sep-kxy 0.03
+  --double-sep-kxy 0.03 \
+  --double-radius-kxy 0.004 \
+  --double-radius-points 16 \
+  --blaze-kx 0.0 \
+  --blaze-ky 0.0045
 ```
 
 ### 5) Direct calibration script
