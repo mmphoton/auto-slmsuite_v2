@@ -34,17 +34,23 @@ class DoubleGaussianParams:
     center_kx: float = 0.0
     center_ky: float = 0.0
     sep_kxy: float = 0.02
+    radius_kxy: float = 0.0
+    radius_points: int = 12
 
     FIELD_DESCRIPTIONS: ClassVar[Dict[str, str]] = {
         "center_kx": "Center kx coordinate in normalized k-space units.",
         "center_ky": "Center ky coordinate in normalized k-space units.",
         "sep_kxy": "Distance between two spots in normalized k-space units (must be > 0).",
+        "radius_kxy": "Effective radius of each spot in normalized k-space units (>= 0).",
+        "radius_points": "Number of circular samples used to approximate non-zero radius (integer >= 3).",
     }
 
     def __post_init__(self) -> None:
         _validate_range("center_kx", self.center_kx, -1.0, 1.0)
         _validate_range("center_ky", self.center_ky, -1.0, 1.0)
         _validate_positive("sep_kxy", self.sep_kxy)
+        _validate_nonnegative("radius_kxy", self.radius_kxy)
+        _validate_int_min("radius_points", self.radius_points, 3)
 
 
 @dataclass(frozen=True)
@@ -221,6 +227,11 @@ def _validate_range(name: str, value: float, minimum: float, maximum: float) -> 
         raise PatternValidationError(
             f"'{name}' must be in [{minimum}, {maximum}] (got {value})"
         )
+
+
+def _validate_nonnegative(name: str, value: float) -> None:
+    if value < 0:
+        raise PatternValidationError(f"'{name}' must be >= 0 (got {value})")
 
 
 def _validate_int_min(name: str, value: int, minimum: int) -> None:

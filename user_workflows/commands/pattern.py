@@ -87,6 +87,22 @@ def _build_lattice_spot_kxy(args):
     return np.vstack((x, y))
 
 
+def _expand_spots_with_radius(spot_kxy, radius_kxy, points=12):
+    """Approximate finite spot radius by a small circular cloud of target points."""
+    radius = float(radius_kxy)
+    if radius <= 0:
+        return np.asarray(spot_kxy, dtype=float)
+
+    base = np.asarray(spot_kxy, dtype=float)
+    thetas = np.linspace(0.0, 2.0 * np.pi, int(points), endpoint=False, dtype=float)
+    offsets = np.vstack((np.cos(thetas), np.sin(thetas))) * radius
+
+    expanded = [base]
+    for idx in range(base.shape[1]):
+        expanded.append(base[:, idx:idx + 1] + offsets)
+    return np.hstack(expanded)
+
+
 def build_pattern(args, slm, deep):
     from slmsuite.holography.algorithms import SpotHologram
     from slmsuite.holography.toolbox import phase
@@ -110,6 +126,7 @@ def build_pattern(args, slm, deep):
             ],
             dtype=float,
         )
+        spot_kxy = _expand_spots_with_radius(spot_kxy, args.double_radius_kxy, points=args.double_radius_points)
     elif args.pattern == "gaussian-lattice":
         spot_kxy = _build_lattice_spot_kxy(args)
     else:
@@ -146,6 +163,18 @@ def add_pattern_args(parser: argparse.ArgumentParser):
     parser.add_argument("--double-center-kx", type=float, default=0.0)
     parser.add_argument("--double-center-ky", type=float, default=0.0)
     parser.add_argument("--double-sep-kxy", type=float, default=0.02)
+    parser.add_argument(
+        "--double-radius-kxy",
+        type=float,
+        default=0.0,
+        help="Effective radius in k-space for each spot (0 keeps diffraction-limited points).",
+    )
+    parser.add_argument(
+        "--double-radius-points",
+        type=int,
+        default=12,
+        help="Number of points on circular ring used to approximate non-zero double-radius-kxy.",
+    )
     parser.add_argument("--lattice-nx", type=int, default=5)
     parser.add_argument("--lattice-ny", type=int, default=5)
     parser.add_argument("--lattice-pitch-x", type=float, default=0.01)
