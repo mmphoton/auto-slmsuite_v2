@@ -54,7 +54,11 @@ python user_workflows/cli.py workflow feedback \
   --pattern double-gaussian \
   --double-center-kx 0.00 \
   --double-center-ky 0.00 \
-  --double-sep-kxy 0.03
+  --double-sep-kxy 0.03 \
+  --double-radius-kxy 0.004 \
+  --double-radius-points 16 \
+  --blaze-kx 0.0 \
+  --blaze-ky 0.0045
 ```
 
 ### 5) Direct calibration script
@@ -84,7 +88,7 @@ python user_workflows/two_gaussian_wgs_test.py \
   --run-experimental-wgs
 ```
 
-Use `--no-phase-depth-correction` to generate/display patterns without loading LUT or other calibration files.
+Pattern workflow always applies LUT depth correction; pass `--lut-file` to choose the calibration LUT explicitly.
 
 Note: this script uses SLM-only `knm` coordinates (`--center-knm-x`, `--center-knm-y`, `--separation-knm`) so it runs without a camera wrapper during initial display; center values are offsets from the FFT center (0,0 by default), and the generated phase uses native SLM resolution for compatibility with blaze addition.
 

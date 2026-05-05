@@ -87,6 +87,22 @@ def _build_lattice_spot_kxy(args):
     return np.vstack((x, y))
 
 
+def _expand_spots_with_radius(spot_kxy, radius_kxy, points=12):
+    """Approximate finite spot radius by a small circular cloud of target points."""
+    radius = float(radius_kxy)
+    if radius <= 0:
+        return np.asarray(spot_kxy, dtype=float)
+
+    base = np.asarray(spot_kxy, dtype=float)
+    thetas = np.linspace(0.0, 2.0 * np.pi, int(points), endpoint=False, dtype=float)
+    offsets = np.vstack((np.cos(thetas), np.sin(thetas))) * radius
+
+    expanded = [base]
+    for idx in range(base.shape[1]):
+        expanded.append(base[:, idx:idx + 1] + offsets)
+    return np.hstack(expanded)
+
+
 def build_pattern(args, slm, deep):
     from slmsuite.holography.algorithms import SpotHologram
     from slmsuite.holography.toolbox import phase
@@ -95,7 +111,7 @@ def build_pattern(args, slm, deep):
     if args.pattern == "laguerre-gaussian":
         lg_phase = phase.laguerre_gaussian(slm, l=args.lg_l, p=args.lg_p)
         phi = np.mod(lg_phase + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
-        return depth_correct(phi, deep) if args.use_phase_depth_correction else phi
+        return depth_correct(phi, deep)
 
     shape = _spot_hologram_shape(slm)
 
@@ -110,6 +126,7 @@ def build_pattern(args, slm, deep):
             ],
             dtype=float,
         )
+        spot_kxy = _expand_spots_with_radius(spot_kxy, args.double_radius_kxy, points=args.double_radius_points)
     elif args.pattern == "gaussian-lattice":
         spot_kxy = _build_lattice_spot_kxy(args)
     else:
@@ -122,21 +139,13 @@ def build_pattern(args, slm, deep):
     # This keeps CLI behavior consistent when users set --blaze-kx/--blaze-ky
     # expecting a first-order offset independent of the selected family.
     phi = np.mod(hologram.get_phase() + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
-    return depth_correct(phi, deep) if args.use_phase_depth_correction else phi
+    return depth_correct(phi, deep)
 
 
 def add_pattern_args(parser: argparse.ArgumentParser):
     parser.add_argument("--pattern", default="laguerre-gaussian", choices=["single-gaussian", "double-gaussian", "gaussian-lattice", "laguerre-gaussian"])
     parser.add_argument("--lut-file", default="deep_1024.mat")
     parser.add_argument("--lut-key", default="deep")
-    parser.add_argument("--use-phase-depth-correction", dest="use_phase_depth_correction", action="store_const", const=True, default=True)
-    parser.add_argument(
-        "--no-phase-depth-correction",
-        dest="use_phase_depth_correction",
-        action="store_const",
-        const=False,
-        help="Disable depth correction and send wrapped phase directly to SLM",
-    )
     parser.add_argument("--blaze-kx", type=float, default=0.0)
     parser.add_argument("--blaze-ky", type=float, default=0.0045)
     parser.add_argument("--lg-l", type=int, default=3)
@@ -146,6 +155,18 @@ def add_pattern_args(parser: argparse.ArgumentParser):
     parser.add_argument("--double-center-kx", type=float, default=0.0)
     parser.add_argument("--double-center-ky", type=float, default=0.0)
     parser.add_argument("--double-sep-kxy", type=float, default=0.02)
+    parser.add_argument(
+        "--double-radius-kxy",
+        type=float,
+        default=0.0,
+        help="Effective radius in k-space for each spot (0 keeps diffraction-limited points).",
+    )
+    parser.add_argument(
+        "--double-radius-points",
+        type=int,
+        default=12,
+        help="Number of points on circular ring used to approximate non-zero double-radius-kxy.",
+    )
     parser.add_argument("--lattice-nx", type=int, default=5)
     parser.add_argument("--lattice-ny", type=int, default=5)
     parser.add_argument("--lattice-pitch-x", type=float, default=0.01)
@@ -169,14 +190,12 @@ def hold_until_interrupt(slm):
 
 
 def run_pattern(args):
-    deep = None
-    if args.use_phase_depth_correction:
-        lut_path = Path(args.lut_file)
-        if not lut_path.exists():
-            raise FileNotFoundError(
-                f"LUT file not found at '{lut_path}'. Fix: pass --lut-file or use --no-phase-depth-correction."
-            )
-        deep = load_phase_lut(lut_path, args.lut_key)
+    lut_path = Path(args.lut_file)
+    if not lut_path.exists():
+        raise FileNotFoundError(
+            f"LUT file not found at '{lut_path}'. Fix: pass --lut-file with a valid LUT path."
+        )
+    deep = load_phase_lut(lut_path, args.lut_key)
 
     if args.dry_run:
         print(f"[dry-run] pattern settings validated for '{args.pattern}'.")
