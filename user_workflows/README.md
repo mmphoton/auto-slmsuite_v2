@@ -23,21 +23,56 @@ python user_workflows/cli.py workflow calibrate \
 ```
 
 ### 2) Pattern display workflow (via unified CLI)
+Default blaze grating in code is `kx=0.0`, `ky=0.02` unless you override it with flags.【see `--blaze-kx/--blaze-ky` defaults】
+
+#### 2.1 One Gaussian spot (set radius + blaze)
 ```bash
 python user_workflows/cli.py workflow pattern \
   --pattern single-gaussian \
   --single-kx 0.00 \
-  --single-ky 0.01
+  --single-ky 0.01 \
+  --single-radius-kxy 0.003 \
+  --spot-radius-points 16 \
+  --blaze-kx 0.0 \
+  --blaze-ky 0.02
 ```
 
-To generate a 5x5 Gaussian spot array with a diagonal shift/carrier of `(0.005, 0.005)`:
+#### 2.2 Pair of Gaussian spots (set radius + separation + blaze)
+```bash
+python user_workflows/cli.py workflow pattern \
+  --pattern double-gaussian \
+  --double-center-kx 0.00 \
+  --double-center-ky 0.02 \
+  --double-sep-kxy 0.03 \
+  --double-radius-kxy 0.004 \
+  --spot-radius-points 16 \
+  --blaze-kx 0.0 \
+  --blaze-ky 0.02
+```
+
+#### 2.3 Gaussian lattice (set radius + lattice separation + blaze)
 ```bash
 python user_workflows/cli.py workflow pattern \
   --pattern gaussian-lattice \
   --lattice-nx 5 \
   --lattice-ny 5 \
-  --blaze-kx 0.005 \
-  --blaze-ky 0.005
+  --lattice-pitch-x 0.01 \
+  --lattice-pitch-y 0.01 \
+  --lattice-radius-kxy 0.003 \
+  --spot-radius-points 16 \
+  --blaze-kx 0.0 \
+  --blaze-ky 0.02
+```
+
+#### 2.4 Laguerre-Gaussian mode (any order + set radius + blaze)
+```bash
+python user_workflows/cli.py workflow pattern \
+  --pattern laguerre-gaussian \
+  --lg-l 4 \
+  --lg-p 1 \
+  --lg-radius-w 0.30 \
+  --blaze-kx 0.0 \
+  --blaze-ky 0.02
 ```
 
 ### 3) Camera acquisition workflow (via unified CLI)
@@ -48,20 +83,7 @@ python user_workflows/cli.py workflow acquire \
   --lattice-ny 6
 ```
 
-### 4) Feedback workflow (via unified CLI)
-```bash
-python user_workflows/cli.py workflow feedback \
-  --pattern double-gaussian \
-  --double-center-kx 0.00 \
-  --double-center-ky 0.00 \
-  --double-sep-kxy 0.03 \
-  --double-radius-kxy 0.004 \
-  --double-radius-points 16 \
-  --blaze-kx 0.0 \
-  --blaze-ky 0.0045
-```
-
-### 5) Direct calibration script
+### 4) Direct calibration script
 ```bash
 python user_workflows/run_calibration.py \
   --factory my_lab.bootstrap:create_fourier_slm \

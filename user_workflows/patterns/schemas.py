@@ -16,15 +16,18 @@ class SingleGaussianParams:
 
     kx: float = 0.0
     ky: float = 0.0
+    radius_kxy: float = 0.0
 
     FIELD_DESCRIPTIONS: ClassVar[Dict[str, str]] = {
         "kx": "Spot kx coordinate in normalized k-space units.",
         "ky": "Spot ky coordinate in normalized k-space units.",
+        "radius_kxy": "Effective radius in normalized k-space units (>= 0).",
     }
 
     def __post_init__(self) -> None:
         _validate_range("kx", self.kx, -1.0, 1.0)
         _validate_range("ky", self.ky, -1.0, 1.0)
+        _validate_nonnegative("radius_kxy", self.radius_kxy)
 
 
 @dataclass(frozen=True)
@@ -35,14 +38,14 @@ class DoubleGaussianParams:
     center_ky: float = 0.0
     sep_kxy: float = 0.02
     radius_kxy: float = 0.0
-    radius_points: int = 12
+    spot_radius_points: int = 12
 
     FIELD_DESCRIPTIONS: ClassVar[Dict[str, str]] = {
         "center_kx": "Center kx coordinate in normalized k-space units.",
         "center_ky": "Center ky coordinate in normalized k-space units.",
         "sep_kxy": "Distance between two spots in normalized k-space units (must be > 0).",
         "radius_kxy": "Effective radius of each spot in normalized k-space units (>= 0).",
-        "radius_points": "Number of circular samples used to approximate non-zero radius (integer >= 3).",
+        "spot_radius_points": "Number of circular samples used to approximate non-zero radius (integer >= 3).",
     }
 
     def __post_init__(self) -> None:
@@ -50,7 +53,7 @@ class DoubleGaussianParams:
         _validate_range("center_ky", self.center_ky, -1.0, 1.0)
         _validate_positive("sep_kxy", self.sep_kxy)
         _validate_nonnegative("radius_kxy", self.radius_kxy)
-        _validate_int_min("radius_points", self.radius_points, 3)
+        _validate_int_min("spot_radius_points", self.spot_radius_points, 3)
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,7 @@ class GaussianLatticeParams:
     pitch_y: float = 0.01
     center_kx: float = 0.0
     center_ky: float = 0.0
+    radius_kxy: float = 0.0
 
     FIELD_DESCRIPTIONS: ClassVar[Dict[str, str]] = {
         "nx": "Number of lattice sites along x (integer >= 1).",
@@ -71,6 +75,7 @@ class GaussianLatticeParams:
         "pitch_y": "Lattice pitch along y in normalized k-space units (must be > 0).",
         "center_kx": "Lattice center kx coordinate in normalized k-space units.",
         "center_ky": "Lattice center ky coordinate in normalized k-space units.",
+        "radius_kxy": "Effective radius for each lattice spot in normalized k-space units (>= 0).",
     }
 
     def __post_init__(self) -> None:
@@ -80,6 +85,7 @@ class GaussianLatticeParams:
         _validate_positive("pitch_y", self.pitch_y)
         _validate_range("center_kx", self.center_kx, -1.0, 1.0)
         _validate_range("center_ky", self.center_ky, -1.0, 1.0)
+        _validate_nonnegative("radius_kxy", self.radius_kxy)
 
 
 @dataclass(frozen=True)
@@ -88,16 +94,20 @@ class LaguerreGaussianParams:
 
     l: int = 3
     p: int = 0
+    radius_w: float | None = None
 
     FIELD_DESCRIPTIONS: ClassVar[Dict[str, str]] = {
         "l": "Azimuthal index l (integer, |l| <= 50).",
         "p": "Radial index p (integer >= 0).",
+        "radius_w": "Laguerre-Gaussian source radius parameter w (optional, > 0 when set).",
     }
 
     def __post_init__(self) -> None:
         if abs(self.l) > 50:
             raise PatternValidationError("'l' must satisfy |l| <= 50")
         _validate_int_min("p", self.p, 0)
+        if self.radius_w is not None:
+            _validate_positive("radius_w", self.radius_w)
 
 
 PatternParams = Union[

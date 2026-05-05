@@ -63,7 +63,7 @@ class DoubleGaussianPattern(BasePattern):
         spot_kxy = _expand_spots_with_radius(
             spot_kxy,
             getattr(args, "double_radius_kxy", 0.0),
-            points=getattr(args, "double_radius_points", 12),
+            points=getattr(args, "spot_radius_points", getattr(args, "double_radius_points", 12)),
         )
         spot_vectors, basis, cameraslm = _spot_inputs_from_kxy(slm, shape, spot_kxy)
         hologram = SpotHologram(shape, spot_vectors=spot_vectors, basis=basis, cameraslm=cameraslm)
