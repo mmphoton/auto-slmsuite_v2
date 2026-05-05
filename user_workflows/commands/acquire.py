@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -48,6 +49,25 @@ def create_fourier_slm(args):
     )
 
     fs = FourierSLM(cam, slm)
+
+    calibration_root = Path(getattr(args, "calibration_root", "user_workflows/calibrations"))
+    fourier_path = calibration_root / "fourier-calibration.h5"
+    wavefront_path = calibration_root / "wavefront-superpixel-calibration.h5"
+    source_amp_path = calibration_root / "source-amplitude-corrected.npy"
+
+    if fourier_path.exists():
+        fs.load_calibration("fourier", str(fourier_path))
+    else:
+        warnings.warn(
+            f"Fourier calibration not found at '{fourier_path}'. Experimental feedback will be unavailable until calibration is provided."
+        )
+
+    if wavefront_path.exists():
+        fs.load_calibration("wavefront_superpixel", str(wavefront_path))
+
+    if source_amp_path.exists():
+        fs.slm.source["amplitude"] = np.load(source_amp_path)
+
     return fs
 
 
