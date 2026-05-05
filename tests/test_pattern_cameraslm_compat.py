@@ -7,6 +7,8 @@ from user_workflows.commands.pattern import (
     _spot_hologram_cameraslm_arg,
     _spot_hologram_shape,
 )
+from user_workflows.patterns.gaussian_lattice import _expand_spots_with_radius as expand_lattice_radius
+from user_workflows.patterns.single_gaussian import _expand_spots_with_radius as expand_single_radius
 
 
 def test_spot_hologram_shape_matches_native_slm_shape():
@@ -55,3 +57,15 @@ def test_deprecated_cameraslm_helper_wraps_raw_slm_with_pitch():
 def test_deprecated_cameraslm_helper_passthrough_for_cameraslm():
     camera_slm = SimpleNamespace(slm=SimpleNamespace(pitch=(8e-6, 8e-6)))
     assert _spot_hologram_cameraslm_arg(camera_slm) is camera_slm
+
+
+def test_single_pattern_radius_expansion_changes_spot_cloud_size():
+    base = np.array([[0.0], [0.0]], dtype=float)
+    expanded = expand_single_radius(base, radius_kxy=0.02, points=8)
+    assert expanded.shape == (2, 9)
+
+
+def test_lattice_pattern_radius_expansion_changes_spot_cloud_size():
+    base = np.array([[0.0, 0.01], [0.0, 0.01]], dtype=float)
+    expanded = expand_lattice_radius(base, radius_kxy=0.01, points=6)
+    assert expanded.shape == (2, 14)
