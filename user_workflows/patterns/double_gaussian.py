@@ -32,6 +32,20 @@ def _spot_hologram_shape(slm):
     return tuple(int(v) for v in slm.shape)
 
 
+def _expand_spots_with_radius(spot_kxy, radius_kxy, points=12):
+    radius = float(radius_kxy)
+    if radius <= 0:
+        return np.asarray(spot_kxy, dtype=float)
+
+    base = np.asarray(spot_kxy, dtype=float)
+    thetas = np.linspace(0.0, 2.0 * np.pi, int(points), endpoint=False, dtype=float)
+    offsets = np.vstack((np.cos(thetas), np.sin(thetas))) * radius
+    expanded = [base]
+    for idx in range(base.shape[1]):
+        expanded.append(base[:, idx:idx + 1] + offsets)
+    return np.hstack(expanded)
+
+
 @register_pattern
 class DoubleGaussianPattern(BasePattern):
     name = "double-gaussian"
@@ -45,6 +59,11 @@ class DoubleGaussianPattern(BasePattern):
                 [args.double_center_ky, args.double_center_ky],
             ],
             dtype=float,
+        )
+        spot_kxy = _expand_spots_with_radius(
+            spot_kxy,
+            getattr(args, "double_radius_kxy", 0.0),
+            points=getattr(args, "spot_radius_points", getattr(args, "double_radius_points", 12)),
         )
         spot_vectors, basis, cameraslm = _spot_inputs_from_kxy(slm, shape, spot_kxy)
         hologram = SpotHologram(shape, spot_vectors=spot_vectors, basis=basis, cameraslm=cameraslm)
