@@ -111,7 +111,7 @@ def build_pattern(args, slm, deep):
     if args.pattern == "laguerre-gaussian":
         lg_phase = phase.laguerre_gaussian(slm, l=args.lg_l, p=args.lg_p)
         phi = np.mod(lg_phase + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
-        return depth_correct(phi, deep) if args.use_phase_depth_correction else phi
+        return depth_correct(phi, deep)
 
     shape = _spot_hologram_shape(slm)
 
@@ -139,21 +139,13 @@ def build_pattern(args, slm, deep):
     # This keeps CLI behavior consistent when users set --blaze-kx/--blaze-ky
     # expecting a first-order offset independent of the selected family.
     phi = np.mod(hologram.get_phase() + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
-    return depth_correct(phi, deep) if args.use_phase_depth_correction else phi
+    return depth_correct(phi, deep)
 
 
 def add_pattern_args(parser: argparse.ArgumentParser):
     parser.add_argument("--pattern", default="laguerre-gaussian", choices=["single-gaussian", "double-gaussian", "gaussian-lattice", "laguerre-gaussian"])
     parser.add_argument("--lut-file", default="deep_1024.mat")
     parser.add_argument("--lut-key", default="deep")
-    parser.add_argument("--use-phase-depth-correction", dest="use_phase_depth_correction", action="store_const", const=True, default=True)
-    parser.add_argument(
-        "--no-phase-depth-correction",
-        dest="use_phase_depth_correction",
-        action="store_const",
-        const=False,
-        help="Disable depth correction and send wrapped phase directly to SLM",
-    )
     parser.add_argument("--blaze-kx", type=float, default=0.0)
     parser.add_argument("--blaze-ky", type=float, default=0.0045)
     parser.add_argument("--lg-l", type=int, default=3)
@@ -198,14 +190,12 @@ def hold_until_interrupt(slm):
 
 
 def run_pattern(args):
-    deep = None
-    if args.use_phase_depth_correction:
-        lut_path = Path(args.lut_file)
-        if not lut_path.exists():
-            raise FileNotFoundError(
-                f"LUT file not found at '{lut_path}'. Fix: pass --lut-file or use --no-phase-depth-correction."
-            )
-        deep = load_phase_lut(lut_path, args.lut_key)
+    lut_path = Path(args.lut_file)
+    if not lut_path.exists():
+        raise FileNotFoundError(
+            f"LUT file not found at '{lut_path}'. Fix: pass --lut-file with a valid LUT path."
+        )
+    deep = load_phase_lut(lut_path, args.lut_key)
 
     if args.dry_run:
         print(f"[dry-run] pattern settings validated for '{args.pattern}'.")
