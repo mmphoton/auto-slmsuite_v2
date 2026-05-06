@@ -88,19 +88,35 @@ def _build_lattice_spot_kxy(args):
 
 
 def _expand_spots_with_radius(spot_kxy, radius_kxy, points=12):
-    """Approximate finite spot radius by a small circular cloud of target points."""
+    """Approximate finite spot radius by a filled disk cloud with smooth weights."""
+    base = np.asarray(spot_kxy, dtype=float)
     radius = float(radius_kxy)
     if radius <= 0:
-        return np.asarray(spot_kxy, dtype=float)
+        return base, None
 
-    base = np.asarray(spot_kxy, dtype=float)
-    thetas = np.linspace(0.0, 2.0 * np.pi, int(points), endpoint=False, dtype=float)
-    offsets = np.vstack((np.cos(thetas), np.sin(thetas))) * radius
+    n_theta = max(6, int(points))
+    n_rings = 4
+    sigma = max(radius / 2.0, 1e-12)
 
-    expanded = [base]
+    expanded = []
+    weights = []
     for idx in range(base.shape[1]):
-        expanded.append(base[:, idx:idx + 1] + offsets)
-    return np.hstack(expanded)
+        center = base[:, idx:idx+1]
+        expanded.append(center)
+        weights.append(1.0)
+
+        for ring in range(1, n_rings + 1):
+            r = radius * (ring / n_rings)
+            count = n_theta * ring
+            thetas = np.linspace(0.0, 2.0 * np.pi, count, endpoint=False, dtype=float)
+            offsets = np.vstack((np.cos(thetas), np.sin(thetas))) * r
+            expanded.append(center + offsets)
+            weights.extend([float(np.exp(-0.5 * (r / sigma) ** 2))] * count)
+
+    cloud = np.hstack(expanded)
+    amp = np.asarray(weights, dtype=float)
+    amp = amp / np.linalg.norm(amp)
+    return cloud, amp
 
 
 def build_pattern(args, slm, deep):
@@ -114,10 +130,11 @@ def build_pattern(args, slm, deep):
         return depth_correct(phi, deep)
 
     shape = _spot_hologram_shape(slm)
+    spot_amp = None
 
     if args.pattern == "single-gaussian":
         spot_kxy = np.array([[args.single_kx], [args.single_ky]], dtype=float)
-        spot_kxy = _expand_spots_with_radius(spot_kxy, args.single_radius_kxy, points=args.spot_radius_points)
+        spot_kxy, spot_amp = _expand_spots_with_radius(spot_kxy, args.single_radius_kxy, points=args.spot_radius_points)
     elif args.pattern == "double-gaussian":
         dx = float(args.double_sep_kxy) / 2.0
         spot_kxy = np.array(
@@ -127,15 +144,15 @@ def build_pattern(args, slm, deep):
             ],
             dtype=float,
         )
-        spot_kxy = _expand_spots_with_radius(spot_kxy, args.double_radius_kxy, points=args.spot_radius_points)
+        spot_kxy, spot_amp = _expand_spots_with_radius(spot_kxy, args.double_radius_kxy, points=args.spot_radius_points)
     elif args.pattern == "gaussian-lattice":
         spot_kxy = _build_lattice_spot_kxy(args)
-        spot_kxy = _expand_spots_with_radius(spot_kxy, args.lattice_radius_kxy, points=args.spot_radius_points)
+        spot_kxy, spot_amp = _expand_spots_with_radius(spot_kxy, args.lattice_radius_kxy, points=args.spot_radius_points)
     else:
         raise ValueError(f"Unknown pattern '{args.pattern}'")
 
     spot_vectors, basis, cameraslm_arg = _as_spot_hologram_inputs(slm, shape, spot_kxy)
-    hologram = SpotHologram(shape, spot_vectors=spot_vectors, basis=basis, cameraslm=cameraslm_arg)
+    hologram = SpotHologram(shape, spot_vectors=spot_vectors, basis=basis, cameraslm=cameraslm_arg, spot_amp=spot_amp)
     hologram.optimize(method=args.holo_method, maxiter=args.holo_maxiter, feedback="computational", stat_groups=["computational"])
     # Apply an optional global blaze to all non-LG spot families as well.
     # This keeps CLI behavior consistent when users set --blaze-kx/--blaze-ky
