@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import scipy.io
+from scipy import special
 
 
 def load_phase_lut(path: Path, key: str = "deep") -> np.ndarray:
@@ -25,11 +26,13 @@ def load_phase_lut(path: Path, key: str = "deep") -> np.ndarray:
 
 
 def depth_correct(phi, deep):
+    if deep is None:
+        return np.mod(phi, 2 * np.pi)
+
     idx = np.clip(np.rint((phi / (2 * np.pi)) * (deep.size - 1)), 0, deep.size - 1).astype(int)
     factors = deep[idx]
     corrected = (phi - np.pi) * factors + np.pi
     return np.mod(corrected, 2 * np.pi)
-
 
 
 
@@ -87,6 +90,45 @@ def _build_lattice_spot_kxy(args):
     return np.vstack((x, y))
 
 
+def _build_laguerre_gaussian_target(shape, l, p=0, radius_w=None):
+    """Build a normalized farfield LG amplitude target for computational WGS.
+
+    ``phase.laguerre_gaussian(..., w=...)`` only uses ``w`` for radial nodes
+    and therefore has no visible radius effect for the common ``p=0`` vortex
+    mode. This target encodes the desired LG amplitude envelope directly, so
+    ``--lg-radius-w`` controls the optimized farfield ring/beam radius for all
+    LG modes, including ``p=0``.
+    """
+    h, w_pixels = (int(shape[0]), int(shape[1]))
+    yy, xx = np.indices((h, w_pixels), dtype=float)
+    x = (xx - (w_pixels - 1) / 2.0) / max(w_pixels / 2.0, 1.0)
+    y = (yy - (h - 1) / 2.0) / max(h / 2.0, 1.0)
+    r = np.sqrt(x * x + y * y)
+
+    waist = 0.30 if radius_w is None else float(radius_w)
+    if waist <= 0:
+        raise ValueError("--lg-radius-w must be positive when provided.")
+
+    abs_l = abs(int(l))
+    radial_order = int(p)
+    if radial_order < 0:
+        raise ValueError("--lg-p must be non-negative.")
+
+    rho = np.sqrt(2.0) * r / waist
+    envelope = np.power(rho, abs_l) * np.exp(-0.5 * rho * rho)
+    if radial_order:
+        envelope *= np.abs(special.genlaguerre(radial_order, abs_l)(rho * rho))
+
+    peak = float(np.nanmax(envelope))
+    if peak <= 0:
+        center_y = h // 2
+        center_x = w_pixels // 2
+        envelope[center_y, center_x] = 1.0
+        peak = 1.0
+
+    return envelope / peak
+
+
 def _expand_spots_with_radius(spot_kxy, radius_kxy, points=12):
     """Approximate finite spot radius by a filled disk cloud with smooth weights."""
     base = np.asarray(spot_kxy, dtype=float)
@@ -124,12 +166,23 @@ def build_pattern(args, slm, deep):
     from slmsuite.holography.toolbox import phase
     from slmsuite.holography.toolbox.phase import blaze
 
+    shape = _spot_hologram_shape(slm)
+
     if args.pattern == "laguerre-gaussian":
+        from slmsuite.holography.algorithms import Hologram
+
         lg_phase = phase.laguerre_gaussian(slm, l=args.lg_l, p=args.lg_p, w=args.lg_radius_w)
-        phi = np.mod(lg_phase + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
+        target = _build_laguerre_gaussian_target(shape, args.lg_l, args.lg_p, args.lg_radius_w)
+        hologram = Hologram(target=target, phase=lg_phase, slm_shape=shape)
+        hologram.optimize(
+            method=args.holo_method,
+            maxiter=args.holo_maxiter,
+            feedback="computational",
+            stat_groups=["computational"],
+        )
+        phi = np.mod(hologram.get_phase() + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
         return depth_correct(phi, deep)
 
-    shape = _spot_hologram_shape(slm)
     spot_amp = None
 
     if args.pattern == "single-gaussian":
@@ -165,11 +218,13 @@ def add_pattern_args(parser: argparse.ArgumentParser):
     parser.add_argument("--pattern", default="laguerre-gaussian", choices=["single-gaussian", "double-gaussian", "gaussian-lattice", "laguerre-gaussian"])
     parser.add_argument("--lut-file", default="deep_1024.mat")
     parser.add_argument("--lut-key", default="deep")
+    parser.add_argument("--use-phase-depth-correction", dest="use_phase_depth_correction", action="store_true", default=True)
+    parser.add_argument("--no-phase-depth-correction", dest="use_phase_depth_correction", action="store_false")
     parser.add_argument("--blaze-kx", type=float, default=0.0)
     parser.add_argument("--blaze-ky", type=float, default=0.02)
     parser.add_argument("--lg-l", type=int, default=3)
     parser.add_argument("--lg-p", type=int, default=0)
-    parser.add_argument("--lg-radius-w", type=float, default=None, help="Laguerre-Gaussian source radius parameter w.")
+    parser.add_argument("--lg-radius-w", type=float, default=None, help="Laguerre-Gaussian farfield waist/ring scale for computational WGS (normalized to half-screen).")
     parser.add_argument("--single-kx", type=float, default=0.0)
     parser.add_argument("--single-ky", type=float, default=0.0)
     parser.add_argument("--single-radius-kxy", type=float, default=0.0)
@@ -187,7 +242,7 @@ def add_pattern_args(parser: argparse.ArgumentParser):
         "--spot-radius-points",
         type=int,
         default=12,
-        help="Number of points on circular ring used to approximate non-zero spot radius.",
+        help="Angular samples per ring used to approximate non-zero finite spot radius.",
     )
     parser.add_argument("--lattice-nx", type=int, default=5)
     parser.add_argument("--lattice-ny", type=int, default=5)
@@ -212,12 +267,14 @@ def hold_until_interrupt(slm):
 
 
 def run_pattern(args):
-    lut_path = Path(args.lut_file)
-    if not lut_path.exists():
-        raise FileNotFoundError(
-            f"LUT file not found at '{lut_path}'. Fix: pass --lut-file with a valid LUT path."
-        )
-    deep = load_phase_lut(lut_path, args.lut_key)
+    deep = None
+    if args.use_phase_depth_correction:
+        lut_path = Path(args.lut_file)
+        if not lut_path.exists():
+            raise FileNotFoundError(
+                f"LUT file not found at '{lut_path}'. Fix: pass --lut-file with a valid LUT path."
+            )
+        deep = load_phase_lut(lut_path, args.lut_key)
 
     if args.dry_run:
         print(f"[dry-run] pattern settings validated for '{args.pattern}'.")
