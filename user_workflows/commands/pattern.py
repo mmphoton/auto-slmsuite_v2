@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import scipy.io
+from scipy import special
 
 
 def load_phase_lut(path: Path, key: str = "deep") -> np.ndarray:
@@ -25,11 +26,13 @@ def load_phase_lut(path: Path, key: str = "deep") -> np.ndarray:
 
 
 def depth_correct(phi, deep):
+    if deep is None:
+        return np.mod(phi, 2 * np.pi)
+
     idx = np.clip(np.rint((phi / (2 * np.pi)) * (deep.size - 1)), 0, deep.size - 1).astype(int)
     factors = deep[idx]
     corrected = (phi - np.pi) * factors + np.pi
     return np.mod(corrected, 2 * np.pi)
-
 
 
 
@@ -87,20 +90,75 @@ def _build_lattice_spot_kxy(args):
     return np.vstack((x, y))
 
 
+def _build_laguerre_gaussian_target(shape, l, p=0, radius_w=None):
+    """Build a normalized farfield LG amplitude target for computational WGS.
+
+    ``phase.laguerre_gaussian(..., w=...)`` only uses ``w`` for radial nodes
+    and therefore has no visible radius effect for the common ``p=0`` vortex
+    mode. This target encodes the desired LG amplitude envelope directly, so
+    ``--lg-radius-w`` controls the optimized farfield ring/beam radius for all
+    LG modes, including ``p=0``.
+    """
+    h, w_pixels = (int(shape[0]), int(shape[1]))
+    yy, xx = np.indices((h, w_pixels), dtype=float)
+    x = (xx - (w_pixels - 1) / 2.0) / max(w_pixels / 2.0, 1.0)
+    y = (yy - (h - 1) / 2.0) / max(h / 2.0, 1.0)
+    r = np.sqrt(x * x + y * y)
+
+    waist = 0.30 if radius_w is None else float(radius_w)
+    if waist <= 0:
+        raise ValueError("--lg-radius-w must be positive when provided.")
+
+    abs_l = abs(int(l))
+    radial_order = int(p)
+    if radial_order < 0:
+        raise ValueError("--lg-p must be non-negative.")
+
+    rho = np.sqrt(2.0) * r / waist
+    envelope = np.power(rho, abs_l) * np.exp(-0.5 * rho * rho)
+    if radial_order:
+        envelope *= np.abs(special.genlaguerre(radial_order, abs_l)(rho * rho))
+
+    peak = float(np.nanmax(envelope))
+    if peak <= 0:
+        center_y = h // 2
+        center_x = w_pixels // 2
+        envelope[center_y, center_x] = 1.0
+        peak = 1.0
+
+    return envelope / peak
+
+
 def _expand_spots_with_radius(spot_kxy, radius_kxy, points=12):
-    """Approximate finite spot radius by a small circular cloud of target points."""
+    """Approximate finite spot radius by a filled disk cloud with smooth weights."""
+    base = np.asarray(spot_kxy, dtype=float)
     radius = float(radius_kxy)
     if radius <= 0:
-        return np.asarray(spot_kxy, dtype=float)
+        return base, None
 
-    base = np.asarray(spot_kxy, dtype=float)
-    thetas = np.linspace(0.0, 2.0 * np.pi, int(points), endpoint=False, dtype=float)
-    offsets = np.vstack((np.cos(thetas), np.sin(thetas))) * radius
+    n_theta = max(6, int(points))
+    n_rings = 4
+    sigma = max(radius / 2.0, 1e-12)
 
-    expanded = [base]
+    expanded = []
+    weights = []
     for idx in range(base.shape[1]):
-        expanded.append(base[:, idx:idx + 1] + offsets)
-    return np.hstack(expanded)
+        center = base[:, idx:idx+1]
+        expanded.append(center)
+        weights.append(1.0)
+
+        for ring in range(1, n_rings + 1):
+            r = radius * (ring / n_rings)
+            count = n_theta * ring
+            thetas = np.linspace(0.0, 2.0 * np.pi, count, endpoint=False, dtype=float)
+            offsets = np.vstack((np.cos(thetas), np.sin(thetas))) * r
+            expanded.append(center + offsets)
+            weights.extend([float(np.exp(-0.5 * (r / sigma) ** 2))] * count)
+
+    cloud = np.hstack(expanded)
+    amp = np.asarray(weights, dtype=float)
+    amp = amp / np.linalg.norm(amp)
+    return cloud, amp
 
 
 def build_pattern(args, slm, deep):
@@ -108,16 +166,28 @@ def build_pattern(args, slm, deep):
     from slmsuite.holography.toolbox import phase
     from slmsuite.holography.toolbox.phase import blaze
 
+    shape = _spot_hologram_shape(slm)
+
     if args.pattern == "laguerre-gaussian":
+        from slmsuite.holography.algorithms import Hologram
+
         lg_phase = phase.laguerre_gaussian(slm, l=args.lg_l, p=args.lg_p, w=args.lg_radius_w)
-        phi = np.mod(lg_phase + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
+        target = _build_laguerre_gaussian_target(shape, args.lg_l, args.lg_p, args.lg_radius_w)
+        hologram = Hologram(target=target, phase=lg_phase, slm_shape=shape)
+        hologram.optimize(
+            method=args.holo_method,
+            maxiter=args.holo_maxiter,
+            feedback="computational",
+            stat_groups=["computational"],
+        )
+        phi = np.mod(hologram.get_phase() + blaze(grid=slm, vector=(args.blaze_kx, args.blaze_ky)), 2 * np.pi)
         return depth_correct(phi, deep)
 
-    shape = _spot_hologram_shape(slm)
+    spot_amp = None
 
     if args.pattern == "single-gaussian":
         spot_kxy = np.array([[args.single_kx], [args.single_ky]], dtype=float)
-        spot_kxy = _expand_spots_with_radius(spot_kxy, args.single_radius_kxy, points=args.spot_radius_points)
+        spot_kxy, spot_amp = _expand_spots_with_radius(spot_kxy, args.single_radius_kxy, points=args.spot_radius_points)
     elif args.pattern == "double-gaussian":
         dx = float(args.double_sep_kxy) / 2.0
         spot_kxy = np.array(
@@ -127,15 +197,15 @@ def build_pattern(args, slm, deep):
             ],
             dtype=float,
         )
-        spot_kxy = _expand_spots_with_radius(spot_kxy, args.double_radius_kxy, points=args.spot_radius_points)
+        spot_kxy, spot_amp = _expand_spots_with_radius(spot_kxy, args.double_radius_kxy, points=args.spot_radius_points)
     elif args.pattern == "gaussian-lattice":
         spot_kxy = _build_lattice_spot_kxy(args)
-        spot_kxy = _expand_spots_with_radius(spot_kxy, args.lattice_radius_kxy, points=args.spot_radius_points)
+        spot_kxy, spot_amp = _expand_spots_with_radius(spot_kxy, args.lattice_radius_kxy, points=args.spot_radius_points)
     else:
         raise ValueError(f"Unknown pattern '{args.pattern}'")
 
     spot_vectors, basis, cameraslm_arg = _as_spot_hologram_inputs(slm, shape, spot_kxy)
-    hologram = SpotHologram(shape, spot_vectors=spot_vectors, basis=basis, cameraslm=cameraslm_arg)
+    hologram = SpotHologram(shape, spot_vectors=spot_vectors, basis=basis, cameraslm=cameraslm_arg, spot_amp=spot_amp)
     hologram.optimize(method=args.holo_method, maxiter=args.holo_maxiter, feedback="computational", stat_groups=["computational"])
     # Apply an optional global blaze to all non-LG spot families as well.
     # This keeps CLI behavior consistent when users set --blaze-kx/--blaze-ky
@@ -148,11 +218,13 @@ def add_pattern_args(parser: argparse.ArgumentParser):
     parser.add_argument("--pattern", default="laguerre-gaussian", choices=["single-gaussian", "double-gaussian", "gaussian-lattice", "laguerre-gaussian"])
     parser.add_argument("--lut-file", default="deep_1024.mat")
     parser.add_argument("--lut-key", default="deep")
+    parser.add_argument("--use-phase-depth-correction", dest="use_phase_depth_correction", action="store_true", default=True)
+    parser.add_argument("--no-phase-depth-correction", dest="use_phase_depth_correction", action="store_false")
     parser.add_argument("--blaze-kx", type=float, default=0.0)
     parser.add_argument("--blaze-ky", type=float, default=0.02)
     parser.add_argument("--lg-l", type=int, default=3)
     parser.add_argument("--lg-p", type=int, default=0)
-    parser.add_argument("--lg-radius-w", type=float, default=None, help="Laguerre-Gaussian source radius parameter w.")
+    parser.add_argument("--lg-radius-w", type=float, default=None, help="Laguerre-Gaussian farfield waist/ring scale for computational WGS (normalized to half-screen).")
     parser.add_argument("--single-kx", type=float, default=0.0)
     parser.add_argument("--single-ky", type=float, default=0.0)
     parser.add_argument("--single-radius-kxy", type=float, default=0.0)
@@ -170,7 +242,7 @@ def add_pattern_args(parser: argparse.ArgumentParser):
         "--spot-radius-points",
         type=int,
         default=12,
-        help="Number of points on circular ring used to approximate non-zero spot radius.",
+        help="Angular samples per ring used to approximate non-zero finite spot radius.",
     )
     parser.add_argument("--lattice-nx", type=int, default=5)
     parser.add_argument("--lattice-ny", type=int, default=5)
@@ -195,12 +267,14 @@ def hold_until_interrupt(slm):
 
 
 def run_pattern(args):
-    lut_path = Path(args.lut_file)
-    if not lut_path.exists():
-        raise FileNotFoundError(
-            f"LUT file not found at '{lut_path}'. Fix: pass --lut-file with a valid LUT path."
-        )
-    deep = load_phase_lut(lut_path, args.lut_key)
+    deep = None
+    if args.use_phase_depth_correction:
+        lut_path = Path(args.lut_file)
+        if not lut_path.exists():
+            raise FileNotFoundError(
+                f"LUT file not found at '{lut_path}'. Fix: pass --lut-file with a valid LUT path."
+            )
+        deep = load_phase_lut(lut_path, args.lut_key)
 
     if args.dry_run:
         print(f"[dry-run] pattern settings validated for '{args.pattern}'.")

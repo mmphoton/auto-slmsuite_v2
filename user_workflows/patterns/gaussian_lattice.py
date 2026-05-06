@@ -32,6 +32,20 @@ def _spot_hologram_shape(slm):
     return tuple(int(v) for v in slm.shape)
 
 
+def _expand_spots_with_radius(spot_kxy, radius_kxy, points=12):
+    radius = float(radius_kxy)
+    if radius <= 0:
+        return np.asarray(spot_kxy, dtype=float)
+
+    base = np.asarray(spot_kxy, dtype=float)
+    thetas = np.linspace(0.0, 2.0 * np.pi, int(points), endpoint=False, dtype=float)
+    offsets = np.vstack((np.cos(thetas), np.sin(thetas))) * radius
+    expanded = [base]
+    for idx in range(base.shape[1]):
+        expanded.append(base[:, idx:idx + 1] + offsets)
+    return np.hstack(expanded)
+
+
 def _build_lattice_spot_kxy(args):
     x_offsets = (np.arange(int(args.lattice_nx), dtype=float) - 0.5 * (int(args.lattice_nx) - 1.0)) * float(args.lattice_pitch_x)
     y_offsets = (np.arange(int(args.lattice_ny), dtype=float) - 0.5 * (int(args.lattice_ny) - 1.0)) * float(args.lattice_pitch_y)
@@ -46,6 +60,11 @@ class GaussianLatticePattern(BasePattern):
     def build(self, args, slm) -> PatternResult:
         shape = _spot_hologram_shape(slm)
         spot_kxy = _build_lattice_spot_kxy(args)
+        spot_kxy = _expand_spots_with_radius(
+            spot_kxy,
+            getattr(args, "lattice_radius_kxy", 0.0),
+            points=getattr(args, "spot_radius_points", 12),
+        )
         spot_vectors, basis, cameraslm = _spot_inputs_from_kxy(slm, shape, spot_kxy)
         hologram = SpotHologram(shape, spot_vectors=spot_vectors, basis=basis, cameraslm=cameraslm)
         hologram.optimize(
